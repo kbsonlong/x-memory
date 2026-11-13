@@ -1,0 +1,14 @@
+{
+  "name": "x-memory",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Local-first X content memory product",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "test": "node --test",
+    "check": "node --check src/schema.js && node --check src/repository.js && node --check src/query.js && node --check src/migration.js && node --check src/ai.js && node --check src/sync.js && node --check apps/extension/background.js && node scripts/check-extension.mjs"
+  }
+}

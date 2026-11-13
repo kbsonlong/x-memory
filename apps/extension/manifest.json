@@ -1,0 +1,22 @@
+{
+  "manifest_version": 3,
+  "name": "X Memory (Development)",
+  "version": "0.1.0",
+  "description": "Local-first X content memory",
+  "permissions": ["storage", "alarms"],
+  "host_permissions": ["https://x.com/*", "https://twitter.com/*"],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "action": {
+    "default_title": "X Memory"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://x.com/*", "https://twitter.com/*"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}
