@@ -24,18 +24,15 @@ export class QueryService {
     for (const entity of entities) {
       const postId = String(entity.payload?.postId || entity.subject?.postId || (entity.type === 'post' ? entity.id.replace(/^post:/, '') : '')).trim();
       if (!postId) continue;
-      if (entity.type === 'ai_artifact') {
-        if (entity.payload?.task !== 'summarize') continue;
-      } else if (!['post', 'timeline_observation', 'visit_event'].includes(entity.type)) continue;
+      if (!['post', 'timeline_observation', 'visit_event'].includes(entity.type)) continue;
       let item = posts.get(postId);
       if (!item) {
-        item = { id: postId, post: null, observations: [], visits: [], summaries: [] };
+        item = { id: postId, post: null, observations: [], visits: [] };
         posts.set(postId, item);
       }
       if (entity.type === 'post') item.post = entity;
       if (entity.type === 'timeline_observation') item.observations.push(entity);
       if (entity.type === 'visit_event') item.visits.push(entity);
-      if (entity.type === 'ai_artifact') item.summaries.push(entity);
     }
     return [...posts.values()].sort((a, b) => feedTimestamp(b).localeCompare(feedTimestamp(a)));
   }
@@ -62,7 +59,7 @@ export class QueryService {
 }
 
 function feedTimestamp(item) {
-  return [item.post, ...item.observations, ...item.visits, ...item.summaries]
+  return [item.post, ...item.observations, ...item.visits]
     .filter(Boolean)
     .map((entity) => entity.observedAt || entity.updatedAt || '')
     .sort((a, b) => String(b).localeCompare(String(a)))[0] || '';

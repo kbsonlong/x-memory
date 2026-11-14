@@ -96,7 +96,7 @@ export function makeVisitEvent({ id, postId: rawPostId, payload = {}, source = {
 }
 
 export function makeAiArtifact({ id, payload = {}, source = { adapter: 'ai.orchestrator' }, observedAt, at }) {
-  if (typeof id !== 'string' || !id.startsWith('ai:summary:')) throw new TypeError('AI artifact id must start with ai:summary:');
+  if (typeof id !== 'string' || !id.startsWith('ai:')) throw new TypeError('AI artifact id must start with ai:');
   return base({ id, type: 'ai_artifact', domain: 'ai', observedAt, source, payload, at });
 }
 

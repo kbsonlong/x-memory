@@ -13,7 +13,7 @@ X Memory 是一个本地优先的 X 内容记忆产品。它把时间线历史�
 - MV3 service worker 消息入口：`memory.query.related`、`rewind.capture`、`footprints.upsert`；
 - 兼容迁移函数：从旧 `items`、`records`、`tombstones` 生成新实体；
 - 时间线帖子、观察事件和访问事件按 `postId` 合并为单条卡片，访问过的帖子显示访问标识；
-- OpenAI 兼容 API 的按帖总结，结果作为 AI artifact 保存在本地；
+- OpenAI 兼容 API 的每日知识日报，分别归纳时间线与访问内容，并基于证据推测兴趣方向；
 - 手动 S3 兼容对象存储同步，支持配置 endpoint、Bucket、Region 和访问凭据。
 
 AI 和 S3 服务由用户在扩展设置中配置。AI Key 和 S3 凭据只保存在扩展本地存储中；帖子正文会发送给配置的 AI 服务，S3 同步会上传本地实体快照。S3 快照当前使用单个 JSON 对象，远端对象未加密；需为 Bucket 配置允许扩展来源执行 GET 和 PUT 的 CORS 规则。

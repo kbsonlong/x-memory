@@ -32,6 +32,15 @@
 
       <section id="summary" class="summary" hidden aria-label="记录统计"></section>
 
+      <section class="daily-panel" aria-label="每日知识日报">
+        <div class="daily-heading">
+          <div><strong>每日知识日报</strong><span>归纳时间线、访问内容与兴趣方向</span></div>
+          <input id="digest-date" type="date" aria-label="日报日期">
+        </div>
+        <button id="generate-digest" class="digest-button" type="button">生成今日知识日报</button>
+        <div id="daily-report" class="daily-report" hidden aria-live="polite"></div>
+      </section>
+
       <section id="settings-panel" class="settings-panel" hidden>
         <div class="settings-heading"><strong>AI 总结</strong><span>API Key 仅保存在本机</span></div>
         <label>API 地址<input id="ai-endpoint" type="url" placeholder="https://api.openai.com/v1/chat/completions"></label>
@@ -51,7 +60,7 @@
           <label>Session Token（可选）<input id="s3-session-token" type="password" autocomplete="off"></label>
           <label>对象前缀<input id="s3-prefix" type="text" placeholder="x-memory"></label>
         </div>
-        <p class="privacy-note">同步会把记录上传到所填的 S3 存储桶；对象内容未加密。AI 总结会把所选帖子正文发送到配置的 AI 服务。</p>
+        <p class="privacy-note">同步会把记录上传到所填的 S3 存储桶；对象内容未加密。生成日报会把所选日期的时间线和访问帖子正文发送到配置的 AI 服务。</p>
         <div class="settings-actions">
           <button id="save-settings" type="button">保存设置</button>
           <button id="sync-now" type="button">立即同步 S3</button>
@@ -90,10 +99,8 @@
         <div class="record-body"></div>
         <button class="more-button" type="button" hidden>展开全文</button>
         <div class="media-grid" hidden></div>
-        <div class="ai-summary" hidden><strong>AI 总结</strong><p></p></div>
         <div class="record-footer">
           <span class="visit-count"></span>
-          <button class="summarize-button" type="button">AI 总结</button>
           <button class="open-button" type="button">打开原帖 ↗</button>
         </div>
       </article>

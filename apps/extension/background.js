@@ -41,8 +41,10 @@ export async function handleMessage(message, sender = {}) {
         const sync = new SyncEngine({ repository, transport });
         return { ok: true, data: await sync.sync() };
       }
-      case 'memory.ai.summarize':
-        return { ok: true, data: await summarizePost(message.postId) };
+      case 'memory.ai.daily-digest':
+        return { ok: true, data: await generateDailyDigest(message.date) };
+      case 'memory.ai.get-daily-digest':
+        return { ok: true, data: await getDailyDigest(message.date) };
       case 'rewind.capture': {
         const post = await repository.put(makePost({ id: message.post.id, payload: message.post, source: sourceOf(sender, 'x.timeline') }));
         const observation = await repository.put(makeTimelineObservation({
@@ -113,31 +115,80 @@ function publicSettings(settings) {
   return { ...settings, aiApiKey: settings.aiApiKey ? '••••••••' : '', s3: { ...settings.s3, secretAccessKey: settings.s3.secretAccessKey ? '••••••••' : '', sessionToken: settings.s3.sessionToken ? '••••••••' : '' } };
 }
 
-async function summarizePost(rawPostId) {
-  const postId = String(rawPostId || '').trim();
-  if (!/^\d+$/.test(postId)) throw new TypeError('postId must be numeric');
-  const related = await query.getRelated({ postId, limit: null });
-  const entities = [related.post, ...related.observations].filter(Boolean);
-  if (!entities.length) throw new Error('找不到这条帖子');
+async function generateDailyDigest(rawDate) {
+  const date = validReportDate(rawDate);
+  const [allTimeline, allVisits] = await Promise.all([
+    repository.list({ type: 'timeline_observation' }),
+    repository.list({ type: 'visit_event' })
+  ]);
+  const timelineToday = allTimeline.filter((entity) => localDateOf(entityTime(entity)) === date);
+  const visitsToday = allVisits.filter((entity) => localDateOf(entityTime(entity)) === date);
+  const timelineByPost = latestByPost(timelineToday);
+  const visitsByPost = latestByPost(visitsToday);
+  const timelineEntities = [...timelineByPost.values()].slice(0, 20);
+  const visitEntities = [...visitsByPost.values()].slice(0, 20);
+  const entities = [...timelineEntities, ...visitEntities];
+  if (!entities.length) throw new Error(`${date} 没有时间线或访问记录`);
   const inputRefs = entities.map((entity) => entity.id);
-  const hashInput = JSON.stringify(entities.map((entity) => ({ id: entity.id, payload: entity.payload })));
+  const stats = {
+    timelinePosts: timelineByPost.size,
+    timelineObservations: timelineToday.length,
+    visitedPosts: visitsByPost.size,
+    visitEvents: visitsToday.length,
+    sampledTimelinePosts: timelineEntities.length,
+    sampledVisitedPosts: visitEntities.length
+  };
+  const hashInput = JSON.stringify({ date, stats, entities: entities.map((entity) => ({ id: entity.id, payload: entity.payload })) });
   const inputHash = await digest(hashInput);
   const settings = await getSettings();
   const model = settings.aiModel || 'gpt-4o-mini';
-  const id = `ai:summary:${inputHash}:${model}`;
+  const id = `ai:daily-digest:${date}:${inputHash}:${model}`;
   const existing = await repository.get(id);
   if (existing) return existing;
   const result = await ai.run({
-    task: 'summarize',
-    context: { entityRefs: inputRefs },
-    options: { language: 'zh-CN', model, maxTokens: 800 },
+    task: 'daily_digest',
+    context: { entityRefs: inputRefs, reportDate: date, stats },
+    options: { language: 'zh-CN', model, maxTokens: 1400, includeFootprints: true },
     settings
   });
   const artifact = makeAiArtifact({
     id,
-    payload: { task: 'summarize', text: result.result.text, model: result.result.model, inputRefs, inputHash, postId }
+    payload: { task: 'daily_digest', date, report: result.result.report, text: result.result.text, model: result.result.model, inputRefs, inputHash, stats }
   });
   return repository.put(artifact);
+}
+
+async function getDailyDigest(rawDate) {
+  const date = validReportDate(rawDate);
+  const artifacts = await repository.list({ type: 'ai_artifact' });
+  return artifacts.find((entity) => entity.payload?.task === 'daily_digest' && entity.payload?.date === date) || null;
+}
+
+function validReportDate(value) {
+  const date = String(value || localDateOf(new Date())).trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) throw new TypeError('date must use YYYY-MM-DD');
+  const parsed = new Date(`${date}T00:00:00`);
+  if (Number.isNaN(parsed.valueOf()) || localDateOf(parsed) !== date) throw new TypeError('date must be a valid calendar date');
+  return date;
+}
+
+function localDateOf(value) {
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.valueOf())) return '';
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+}
+
+function entityTime(entity) {
+  return entity.observedAt || entity.payload?.visitedAt || entity.updatedAt;
+}
+
+function latestByPost(entities) {
+  const result = new Map();
+  for (const entity of entities) {
+    const postId = String(entity.payload?.postId || entity.subject?.postId || '').trim();
+    if (postId && !result.has(postId)) result.set(postId, entity);
+  }
+  return result;
 }
 
 async function digest(value) {

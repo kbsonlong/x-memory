@@ -50,18 +50,18 @@ test('query joins a post with observations and visits by postId', async () => {
   assert.equal(result.counts.visits, 1);
 });
 
-test('feed groups timeline, visits, and AI summaries into one item per post', async () => {
+test('feed groups timeline and visits into one item and omits AI reports', async () => {
   const { repository, query } = setup();
   await repository.put(makePost({ id: '123', payload: { text: 'hello' } }));
   await repository.put(makeTimelineObservation({ id: 'page-1', postId: '123' }));
   await repository.put(makeVisitEvent({ id: 'device-a:123:1', postId: '123' }));
-  await repository.put(makeAiArtifact({ id: 'ai:summary:hash:model', payload: { postId: '123', task: 'summarize', text: '总结' } }));
+  await repository.put(makeAiArtifact({ id: 'ai:daily-digest:2026-11-14:hash:model', payload: { date: '2026-11-14', task: 'daily_digest', text: '日报' } }));
   const feed = await query.getFeed();
   assert.equal(feed.length, 1);
   assert.equal(feed[0].id, '123');
   assert.equal(feed[0].observations.length, 1);
   assert.equal(feed[0].visits.length, 1);
-  assert.equal(feed[0].summaries.length, 1);
+  assert.equal(Object.hasOwn(feed[0], 'summaries'), false);
 });
 
 test('legacy migration is deterministic and skips invalid records', () => {
@@ -93,6 +93,20 @@ test('AI excludes footprints unless explicitly authorized', async () => {
   assert.deepEqual(result.inputRefs, ['post:123']);
 });
 
+test('daily digest can include timeline and visit entries with day statistics', async () => {
+  const { repository, query } = setup();
+  await repository.put(makeTimelineObservation({ id: 'timeline-123', postId: '123', payload: { text: '时间线知识' } }));
+  await repository.put(makeVisitEvent({ id: 'visit-123', postId: '123', payload: { text: '访问知识' } }));
+  const ai = createAiOrchestrator({ query, provider: async ({ entities, context }) => ({ ids: entities.map((entity) => entity.id), date: context.reportDate }) });
+  const result = await ai.run({
+    task: 'daily_digest',
+    context: { entityRefs: ['timeline:timeline-123', 'visit:visit-123'], reportDate: '2026-11-14' },
+    options: { includeFootprints: true }
+  });
+  assert.deepEqual(result.result.ids, ['timeline:timeline-123', 'visit:visit-123']);
+  assert.equal(result.result.date, '2026-11-14');
+});
+
 test('OpenAI-compatible provider sends bounded post text and returns the summary', async () => {
   let call;
   const provider = createOpenAiCompatibleProvider({ fetchImpl: async (url, options) => {
@@ -109,6 +123,29 @@ test('OpenAI-compatible provider sends bounded post text and returns the summary
   assert.equal(call.url, 'https://ai.example.test/v1/chat/completions');
   assert.equal(call.options.headers.Authorization, 'Bearer secret');
   assert.match(call.options.body, /原帖内容/);
+});
+
+test('OpenAI-compatible provider returns structured daily knowledge categories', async () => {
+  const report = { overall: '今天主要关注 AI。', timelineKnowledge: [{ category: '人工智能', summary: '模型应用' }], visitedKnowledge: [{ category: '开发工具', summary: '工具链' }], interestDirections: [{ direction: 'AI 工具', evidence: '多条相关帖子', confidence: '中' }] };
+  let body;
+  const provider = createOpenAiCompatibleProvider({ fetchImpl: async (_url, options) => {
+    body = JSON.parse(options.body);
+    return { ok: true, json: async () => ({ model: 'model-v1', choices: [{ message: { content: JSON.stringify(report) } }] }) };
+  } });
+  const result = await provider({
+    task: 'daily_digest',
+    context: { reportDate: '2026-11-14', stats: { timelinePosts: 1, visitedPosts: 1 } },
+    entities: [
+      { id: 'timeline:1', type: 'timeline_observation', observedAt: '2026-11-14T10:00:00Z', payload: { text: '时间线内容' } },
+      { id: 'visit:1', type: 'visit_event', observedAt: '2026-11-14T11:00:00Z', payload: { text: '访问内容' } }
+    ],
+    settings: { aiApiKey: 'secret' }
+  });
+  assert.deepEqual(result.report, report);
+  assert.match(body.messages[0].content, /必须区分 timeline 与 visited/);
+  const userInput = JSON.parse(body.messages[1].content);
+  assert.equal(userInput.reportDate, '2026-11-14');
+  assert.deepEqual(userInput.posts.map((post) => post.source), ['timeline', 'visited']);
 });
 
 test('sync without transport preserves local-only state', async () => {

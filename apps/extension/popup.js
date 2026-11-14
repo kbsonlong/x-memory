@@ -5,8 +5,12 @@ const template = document.querySelector('#record-template');
 const searchInput = document.querySelector('#search');
 const filters = [...document.querySelectorAll('.filter')];
 const settingsPanel = document.querySelector('#settings-panel');
+const digestDate = document.querySelector('#digest-date');
+const dailyReport = document.querySelector('#daily-report');
 let activeFilter = 'all';
 let allItems = [];
+
+digestDate.value = localDateString(new Date());
 
 for (const button of filters) {
   button.addEventListener('click', () => {
@@ -27,6 +31,8 @@ document.querySelector('#settings-toggle').addEventListener('click', () => {
 });
 document.querySelector('#save-settings').addEventListener('click', saveSettings);
 document.querySelector('#sync-now').addEventListener('click', syncNow);
+document.querySelector('#generate-digest').addEventListener('click', generateDailyDigest);
+digestDate.addEventListener('change', loadDailyDigest);
 searchInput.addEventListener('input', renderItems);
 
 function send(message) {
@@ -114,7 +120,7 @@ function mergedPayload(item) {
 }
 
 function searchableText(item) {
-  const values = [...entitiesOf(item), ...(item.summaries || [])].flatMap((entity) => {
+  const values = entitiesOf(item).flatMap((entity) => {
     const payload = payloadOf(entity);
     return [payload.text, payload.authorName, payload.authorHandle, payload.postId, payload.url];
   });
@@ -196,27 +202,6 @@ function addRecord(item) {
 
   createMedia(node.querySelector('.media-grid'), media);
   node.querySelector('.visit-count').textContent = item.visits.length ? `访问 ${item.visits.length} 次` : '仅本地保存';
-  const summaryBox = node.querySelector('.ai-summary');
-  const summaryArtifact = item.summaries?.[0];
-  if (summaryArtifact?.payload?.text) {
-    summaryBox.hidden = false;
-    summaryBox.querySelector('p').textContent = summaryArtifact.payload.text;
-  }
-  const summarize = node.querySelector('.summarize-button');
-  summarize.addEventListener('click', async () => {
-    summarize.disabled = true;
-    summarize.textContent = '正在总结…';
-    try {
-      const response = await send({ type: 'memory.ai.summarize', postId });
-      if (!response?.ok) throw new Error(response?.error?.message || '总结失败');
-      await loadRecords();
-      status.textContent = 'AI 总结已保存';
-    } catch (error) {
-      status.textContent = `AI 总结失败：${error.message}`;
-      summarize.disabled = false;
-      summarize.textContent = '重试总结';
-    }
-  });
   const open = node.querySelector('.open-button');
   if (url) {
     open.addEventListener('click', () => chrome.tabs.create({ url }));
@@ -225,6 +210,94 @@ function addRecord(item) {
     open.textContent = '暂无原帖链接';
   }
   records.append(node);
+}
+
+function localDateString(date) {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+}
+
+function addKnowledgeGroup(container, title, items) {
+  const section = document.createElement('section');
+  section.className = 'knowledge-group';
+  const heading = document.createElement('h4');
+  heading.textContent = title;
+  section.append(heading);
+  if (!items.length) {
+    const empty = document.createElement('p');
+    empty.textContent = '当天没有足够内容归入此部分。';
+    section.append(empty);
+  }
+  for (const item of items) {
+    const article = document.createElement('article');
+    const label = document.createElement('strong');
+    label.textContent = item.category || item.direction || '其他';
+    const detail = document.createElement('p');
+    detail.textContent = item.summary || item.evidence || '';
+    article.append(label, detail);
+    if (Array.isArray(item.examples) && item.examples.length) {
+      const examples = document.createElement('small');
+      examples.textContent = `涉及：${item.examples.join('、')}`;
+      article.append(examples);
+    }
+    if (item.confidence) {
+      const confidence = document.createElement('small');
+      confidence.textContent = `推测置信度：${item.confidence}`;
+      article.append(confidence);
+    }
+    section.append(article);
+  }
+  container.append(section);
+}
+
+function renderDailyDigest(artifact) {
+  dailyReport.replaceChildren();
+  if (!artifact?.payload) {
+    dailyReport.hidden = true;
+    return;
+  }
+  const payload = artifact.payload;
+  const report = payload.report || { overall: payload.text };
+  const overall = document.createElement('p');
+  overall.className = 'digest-overall';
+  overall.textContent = report.overall || '本日报没有总体摘要。';
+  dailyReport.append(overall);
+  addKnowledgeGroup(dailyReport, '时间线内容', Array.isArray(report.timelineKnowledge) ? report.timelineKnowledge : []);
+  addKnowledgeGroup(dailyReport, '主动访问内容', Array.isArray(report.visitedKnowledge) ? report.visitedKnowledge : []);
+  addKnowledgeGroup(dailyReport, '可能感兴趣的方向', Array.isArray(report.interestDirections) ? report.interestDirections : []);
+  const stats = document.createElement('small');
+  stats.className = 'digest-stats';
+  stats.textContent = `时间线 ${payload.stats?.timelinePosts || 0} 条 · 访问 ${payload.stats?.visitedPosts || 0} 条 · 模型 ${payload.model || '未知'}`;
+  dailyReport.append(stats);
+  dailyReport.hidden = false;
+}
+
+async function loadDailyDigest() {
+  if (!digestDate.value) return;
+  try {
+    const response = await send({ type: 'memory.ai.get-daily-digest', date: digestDate.value });
+    if (!response?.ok) throw new Error(response?.error?.message || '读取日报失败');
+    renderDailyDigest(response.data);
+  } catch (error) {
+    status.textContent = `读取日报失败：${error.message}`;
+  }
+}
+
+async function generateDailyDigest() {
+  const button = document.querySelector('#generate-digest');
+  button.disabled = true;
+  button.textContent = '正在分析当天内容…';
+  status.textContent = '正在整理知识类别和兴趣方向…';
+  try {
+    const response = await send({ type: 'memory.ai.daily-digest', date: digestDate.value });
+    if (!response?.ok) throw new Error(response?.error?.message || '日报生成失败');
+    renderDailyDigest(response.data);
+    status.textContent = `${digestDate.value} 的知识日报已保存`;
+  } catch (error) {
+    status.textContent = `知识日报生成失败：${error.message}`;
+  } finally {
+    button.disabled = false;
+    button.textContent = '生成知识日报';
+  }
 }
 
 function renderItems() {
@@ -380,3 +453,4 @@ chrome.storage.onChanged.addListener((changes, area) => {
 
 refreshRecords();
 loadSettings();
+loadDailyDigest();
