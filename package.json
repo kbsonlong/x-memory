@@ -9,7 +9,7 @@
   },
   "scripts": {
     "test": "node --test test/*.test.js",
-    "check": "node --check src/schema.js && node --check src/repository.js && node --check src/query.js && node --check src/migration.js && node --check src/ai.js && node --check src/sync.js && node --check apps/extension/background.js && node --check apps/extension/content.js && node scripts/check-extension.mjs",
+    "check": "node --check src/schema.js && node --check src/repository.js && node --check src/query.js && node --check src/migration.js && node --check src/ai.js && node --check src/sync.js && node --check apps/extension/background.js && node --check apps/extension/content.js && node --check apps/extension/popup.js && node scripts/check-extension.mjs",
     "build:extensions": "node scripts/build-extensions.mjs"
   }
 }

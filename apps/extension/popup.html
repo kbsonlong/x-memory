@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>X Memory</title>
+    <link rel="stylesheet" href="popup.css">
+  </head>
+  <body>
+    <header class="header">
+      <div>
+        <p class="eyebrow">X MEMORY</p>
+        <h1>本地记忆</h1>
+      </div>
+      <button id="refresh" class="icon-button" type="button" title="刷新列表" aria-label="刷新列表">↻</button>
+    </header>
+
+    <main>
+      <div id="status" class="status" role="status">正在读取本地记录…</div>
+      <section id="summary" class="summary" hidden aria-label="记录统计"></section>
+      <section id="records" class="records" aria-live="polite"></section>
+    </main>
+
+    <template id="record-template">
+      <article class="record">
+        <div class="record-meta"></div>
+        <div class="record-title"></div>
+        <div class="record-body"></div>
+        <div class="record-time"></div>
+      </article>
+    </template>
+
+    <script type="module" src="popup.js"></script>
+  </body>
+</html>

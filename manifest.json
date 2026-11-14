@@ -10,7 +10,8 @@
     "type": "module"
   },
   "action": {
-    "default_title": "X Memory"
+    "default_title": "X Memory",
+    "default_popup": "apps/extension/popup.html"
   },
   "content_scripts": [
     {

@@ -34,7 +34,7 @@ function stageExtension(destination) {
   reset(destination);
   cpSync(join(root, 'manifest.json'), join(destination, 'manifest.json'));
   mkdirSync(join(destination, 'apps', 'extension'), { recursive: true });
-  for (const file of ['background.js', 'content.js']) {
+  for (const file of ['background.js', 'content.js', 'popup.html', 'popup.js', 'popup.css']) {
     cpSync(join(root, 'apps', 'extension', file), join(destination, 'apps', 'extension', file));
   }
   cpSync(join(root, 'src'), join(destination, 'src'), { recursive: true });

@@ -33,7 +33,7 @@ npm run build:extensions
 
 构建默认使用 `CODE_SIGNING_ALLOWED=NO`，用于验证编译和嵌入扩展结构。安装到 Safari 或分发前，需要在 Xcode 中选择有效的 Apple Development/Distribution signing identity。项目中 `apps/extension/manifest.json` 是早期源码参考；Chrome 发布包只使用根目录 `manifest.json`，避免两个扩展根目录产生歧义。
 
-在 Chrome 中加载项目根目录 `/Volumes/nfs/src/x-memory` 作为 unpacked extension。根目录的 `manifest.json` 指向 `apps/extension`，这样 service worker 可以使用同一项目内的 `src` 模块。
+在 Chrome 中加载项目根目录 `/Volumes/nfs/src/x-memory` 作为 unpacked extension。根目录的 `manifest.json` 指向 `apps/extension`，这样 service worker 可以使用同一项目内的 `src` 模块。点击扩展图标会打开 X Memory popup；如果此前已经加载过旧版本，需要在 `chrome://extensions` 点击 Reload，或移除后重新加载包含 `manifest.json` 的解压目录。
 
 ## 目录
 
