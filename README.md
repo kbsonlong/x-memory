@@ -21,7 +21,17 @@ AI 和远端同步目前只完成接口与本地状态契约，未宣称已经�
 ```sh
 npm test
 npm run check
+npm run build:extensions
 ```
+
+`npm run build:extensions` 会生成：
+
+- `build/chrome/x-memory-chrome.zip`：Chrome MV3 发布包。Chrome 开发调试仍可直接加载项目根目录 `/Volumes/nfs/src/x-memory`；
+- `build/safari/X-Memory.app`：macOS Safari Web Extension App；
+- `build/safari/X-Memory-macos-safari.zip`：macOS Safari App 压缩包；
+- `build/safari-project/X Memory/X Memory.xcodeproj`：Safari 的 Xcode 工程。
+
+构建默认使用 `CODE_SIGNING_ALLOWED=NO`，用于验证编译和嵌入扩展结构。安装到 Safari 或分发前，需要在 Xcode 中选择有效的 Apple Development/Distribution signing identity。项目中 `apps/extension/manifest.json` 是早期源码参考；Chrome 发布包只使用根目录 `manifest.json`，避免两个扩展根目录产生歧义。
 
 在 Chrome 中加载项目根目录 `/Volumes/nfs/src/x-memory` 作为 unpacked extension。根目录的 `manifest.json` 指向 `apps/extension`，这样 service worker 可以使用同一项目内的 `src` 模块。
 
