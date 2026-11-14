@@ -44,12 +44,24 @@ export class Repository {
   constructor(store) {
     if (!store) throw new TypeError('Repository requires a store');
     this.store = store;
+    this.writes = new Map();
   }
 
   async put(entity) {
     assertEntity(entity);
     const namespace = namespaceFor(entity);
     const key = storageKey(namespace);
+    const previousWrite = this.writes.get(key) ?? Promise.resolve();
+    const write = previousWrite.catch(() => {}).then(() => this.putInNamespace(key, entity));
+    this.writes.set(key, write);
+    try {
+      return await write;
+    } finally {
+      if (this.writes.get(key) === write) this.writes.delete(key);
+    }
+  }
+
+  async putInNamespace(key, entity) {
     const current = (await this.store.get(key)) ?? {};
     const previous = current[entity.id];
     const next = mergeEntity(previous, entity);

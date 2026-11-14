@@ -35,6 +35,6 @@ export class QueryService {
       if (domains?.length && !domains.includes(entity.domain)) return false;
       if (!needle) return true;
       return JSON.stringify(entity.payload).toLocaleLowerCase().includes(needle);
-    }).slice(0, limit);
+    }).slice(0, limit ?? undefined);
   }
 }

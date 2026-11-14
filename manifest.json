@@ -3,8 +3,8 @@
   "name": "X Memory (Development)",
   "version": "0.1.0",
   "description": "Local-first X content memory",
-  "permissions": ["storage", "alarms"],
-  "host_permissions": ["https://x.com/*", "https://twitter.com/*"],
+  "permissions": ["storage", "alarms", "scripting"],
+  "host_permissions": ["https://x.com/*", "https://twitter.com/*", "https://pbs.twimg.com/*"],
   "background": {
     "service_worker": "apps/extension/background.js",
     "type": "module"

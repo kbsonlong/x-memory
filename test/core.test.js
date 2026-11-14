@@ -23,6 +23,22 @@ test('repository keeps timeline and footprint namespaces separate', async () => 
   assert.equal(Object.keys(snapshot['footprints.visit_events']).length, 1);
 });
 
+test('concurrent writes preserve every post and observation', async () => {
+  const { repository } = setup();
+  await Promise.all(Array.from({ length: 50 }, (_, i) => Promise.all([
+    repository.put(makePost({ id: String(i + 1) })),
+    repository.put(makeTimelineObservation({ id: `page-${i}`, postId: String(i + 1) }))
+  ])));
+  assert.equal((await repository.list({ type: 'post' })).length, 50);
+  assert.equal((await repository.list({ type: 'timeline_observation' })).length, 50);
+});
+
+test('search can return all entities when requested', async () => {
+  const { repository, query } = setup();
+  await Promise.all(Array.from({ length: 210 }, (_, i) => repository.put(makePost({ id: String(i + 1) }))));
+  assert.equal((await query.search({ limit: null })).length, 210);
+});
+
 test('query joins a post with observations and visits by postId', async () => {
   const { repository, query } = setup();
   await repository.put(makePost({ id: '123', payload: { text: 'hello' } }));

@@ -2,8 +2,25 @@ const status = document.querySelector('#status');
 const summary = document.querySelector('#summary');
 const records = document.querySelector('#records');
 const template = document.querySelector('#record-template');
+const searchInput = document.querySelector('#search');
+const filters = [...document.querySelectorAll('.filter')];
+let activeFilter = 'all';
+let allItems = [];
 
-document.querySelector('#refresh').addEventListener('click', loadRecords);
+for (const button of filters) {
+  button.addEventListener('click', () => {
+    activeFilter = button.dataset.filter;
+    for (const item of filters) {
+      const active = item === button;
+      item.classList.toggle('active', active);
+      item.setAttribute('aria-selected', String(active));
+    }
+    renderItems();
+  });
+}
+
+document.querySelector('#refresh').addEventListener('click', refreshRecords);
+searchInput.addEventListener('input', renderItems);
 
 function send(message) {
   return new Promise((resolve, reject) => {
@@ -15,54 +32,257 @@ function send(message) {
   });
 }
 
+function payloadOf(entity) {
+  return entity?.payload && typeof entity.payload === 'object' ? entity.payload : {};
+}
+
+function postIdOf(entity) {
+  return String(payloadOf(entity).postId || entity?.subject?.postId || entity?.id?.replace(/^post:/, '') || '').trim();
+}
+
+function timestampOf(entity) {
+  return entity?.observedAt || entity?.updatedAt || payloadOf(entity).visitedAt || payloadOf(entity).capturedAt || '';
+}
+
 function formatTime(value) {
   if (!value) return '时间未知';
   const date = new Date(value);
-  return Number.isNaN(date.valueOf()) ? String(value) : date.toLocaleString();
+  if (Number.isNaN(date.valueOf())) return String(value);
+  const diff = Date.now() - date.valueOf();
+  if (diff >= 0 && diff < 60 * 1000) return '刚刚';
+  if (diff >= 0 && diff < 60 * 60 * 1000) return `${Math.floor(diff / 60000)} 分钟前`;
+  if (diff >= 0 && diff < 24 * 60 * 60 * 1000) return `${Math.floor(diff / 3600000)} 小时前`;
+  return date.toLocaleDateString('zh-CN', { month: 'short', day: 'numeric' });
 }
 
-function textFrom(entity) {
-  const payload = entity.payload ?? {};
-  return payload.text || payload.url || payload.postId || entity.id;
+function safeUrl(value) {
+  try {
+    const url = new URL(String(value));
+    return /^https?:$/.test(url.protocol) ? url.href : '';
+  } catch {
+    return '';
+  }
 }
 
-function addRecord(entity) {
+function mediaFrom(payload) {
+  const rawMedia = payload.media;
+  const mediaValues = Array.isArray(rawMedia)
+    ? rawMedia
+    : rawMedia && typeof rawMedia === 'object'
+      ? rawMedia.assets || rawMedia.items || []
+      : [];
+  const values = [
+    ...mediaValues,
+    ...(Array.isArray(payload.images) ? payload.images : []),
+    ...(Array.isArray(payload.mediaUrls) ? payload.mediaUrls : [])
+  ];
+  const result = [];
+  const seen = new Set();
+  for (const value of values) {
+    const url = safeUrl(typeof value === 'string' ? value : value?.url || value?.media_url_https || value?.src);
+    if (!url || seen.has(url)) continue;
+    seen.add(url);
+    result.push({ url, alt: typeof value === 'object' ? String(value.alt || value.description || '帖子图片') : '帖子图片' });
+  }
+  return result.slice(0, 4);
+}
+
+function mergeItems(entities) {
+  const posts = new Map();
+  for (const entity of entities) {
+    const id = postIdOf(entity) || entity.id;
+    let item = posts.get(id);
+    if (!item) {
+      item = { id, post: null, observations: [], visits: [] };
+      posts.set(id, item);
+    }
+    if (entity.type === 'post') item.post = entity;
+    if (entity.type === 'timeline_observation') item.observations.push(entity);
+    if (entity.type === 'visit_event') item.visits.push(entity);
+  }
+  return [...posts.values()].sort((a, b) => itemTimestamp(b).localeCompare(itemTimestamp(a)));
+}
+
+function entitiesOf(item) {
+  return [item.post, ...item.observations, ...item.visits].filter(Boolean);
+}
+
+function itemTimestamp(item) {
+  return entitiesOf(item)
+    .map(timestampOf)
+    .filter(Boolean)
+    .sort((a, b) => String(b).localeCompare(String(a)))[0] || '';
+}
+
+function mergedPayload(item) {
+  const result = {};
+  for (const entity of [...entitiesOf(item)].reverse()) {
+    for (const [key, value] of Object.entries(payloadOf(entity))) {
+      if (value === undefined || value === null || value === '') continue;
+      if (Array.isArray(value) && value.length === 0) continue;
+      result[key] = value;
+    }
+  }
+  return result;
+}
+
+function searchableText(item) {
+  const values = entitiesOf(item).flatMap((entity) => {
+    const payload = payloadOf(entity);
+    return [payload.text, payload.authorName, payload.authorHandle, payload.postId, payload.url];
+  });
+  return values.filter(Boolean).join(' ').toLocaleLowerCase();
+}
+
+function visibleItems() {
+  const needle = searchInput.value.trim().toLocaleLowerCase();
+  return allItems.filter((item) => {
+    if (activeFilter === 'visited' && !item.visits.length) return false;
+    if (activeFilter === 'timeline' && !item.post && !item.observations.length) return false;
+    return !needle || searchableText(item).includes(needle);
+  });
+}
+
+function createMedia(mediaGrid, media) {
+  if (!media.length) return;
+  mediaGrid.hidden = false;
+  mediaGrid.classList.toggle('single', media.length === 1);
+  for (const image of media) {
+    const wrapper = document.createElement('div');
+    wrapper.className = 'media-item';
+    const img = document.createElement('img');
+    img.src = image.url;
+    img.alt = image.alt;
+    img.loading = 'lazy';
+    img.addEventListener('error', () => {
+      wrapper.classList.add('media-error');
+      img.removeAttribute('src');
+      wrapper.textContent = '图片暂时无法加载';
+    }, { once: true });
+    wrapper.append(img);
+    mediaGrid.append(wrapper);
+  }
+}
+
+function addRecord(item) {
   const node = template.content.cloneNode(true);
   const record = node.querySelector('.record');
-  const payload = entity.payload ?? {};
-  const isVisit = entity.type === 'visit_event';
-  node.querySelector('.record-meta').textContent = isVisit ? '访问足迹' : '时间线';
-  node.querySelector('.record-title').textContent = payload.authorName || payload.postId || entity.id;
-  node.querySelector('.record-body').textContent = textFrom(entity);
-  node.querySelector('.record-time').textContent = formatTime(entity.observedAt || entity.updatedAt);
-  if (isVisit) record.classList.add('visit');
+  const source = item.post || item.observations.at(-1) || item.visits.at(-1);
+  const payload = mergedPayload(item);
+  const postId = item.id;
+  const text = String(payload.text || '').trim();
+  const authorName = String(payload.authorName || 'X 内容').trim();
+  const handle = payload.authorHandle ? `@${String(payload.authorHandle).replace(/^@/, '')}` : '本地保存';
+  const url = safeUrl(payload.url) || (postId.match(/^\d+$/) ? `https://x.com/i/status/${postId}` : '');
+  const media = mediaFrom(payload);
+
+  node.querySelector('.record-type').textContent = item.visits.length ? '已访问 · 时间线' : '时间线记录';
+  node.querySelector('.record-time').textContent = formatTime(itemTimestamp(item));
+  node.querySelector('.author-name').textContent = authorName;
+  node.querySelector('.author-handle').textContent = handle;
+  node.querySelector('.record-body').textContent = text || '这条记录没有提取到正文。打开原帖可以查看完整内容。';
+  if (!text) record.classList.add('no-text');
+
+  const body = node.querySelector('.record-body');
+  const more = node.querySelector('.more-button');
+  if (text.length > 320) {
+    body.classList.add('collapsed');
+    more.hidden = false;
+    more.addEventListener('click', () => {
+      const expanded = body.classList.toggle('expanded');
+      body.classList.toggle('collapsed', !expanded);
+      more.textContent = expanded ? '收起' : '展开全文';
+    });
+  }
+
+  const avatar = node.querySelector('.avatar');
+  const avatarUrl = safeUrl(payload.avatarUrl || payload.profileImageUrl);
+  if (avatarUrl) {
+    const image = document.createElement('img');
+    image.src = avatarUrl;
+    image.alt = '';
+    image.addEventListener('error', () => image.remove(), { once: true });
+    avatar.append(image);
+  } else {
+    avatar.textContent = authorName.slice(0, 1).toUpperCase();
+  }
+
+  createMedia(node.querySelector('.media-grid'), media);
+  node.querySelector('.visit-count').textContent = item.visits.length ? `访问 ${item.visits.length} 次` : '仅本地保存';
+  const open = node.querySelector('.open-button');
+  if (url) {
+    open.addEventListener('click', () => chrome.tabs.create({ url }));
+  } else {
+    open.disabled = true;
+    open.textContent = '暂无原帖链接';
+  }
   records.append(node);
+}
+
+function renderItems() {
+  records.replaceChildren();
+  const items = visibleItems();
+  if (!items.length) {
+    const empty = document.createElement('div');
+    empty.className = 'empty-state';
+    empty.innerHTML = '<div class="empty-icon">⌁</div><strong>没有匹配的内容</strong><span>打开 X 页面后，插件会自动保存可见帖子。</span>';
+    records.append(empty);
+    return;
+  }
+  for (const item of items) addRecord(item);
 }
 
 async function loadRecords() {
   status.textContent = '正在读取本地记录…';
-  status.className = 'status';
+  document.querySelector('.hero').classList.remove('error');
   records.replaceChildren();
-  summary.hidden = true;
   try {
-    const response = await send({ type: 'memory.query.search', query: '', limit: 100 });
+    const response = await send({ type: 'memory.query.search', query: '', limit: null });
     if (!response?.ok) throw new Error(response?.error?.message || '读取失败');
     const entities = response.data ?? [];
-    const posts = entities.filter((entity) => entity.type === 'post' || entity.type === 'timeline_observation');
-    const visits = entities.filter((entity) => entity.type === 'visit_event');
-    summary.textContent = `时间线 ${posts.length} · 访问足迹 ${visits.length}`;
+    allItems = mergeItems(entities);
+    const visits = entities.filter((entity) => entity.type === 'visit_event').length;
+    const observations = entities.filter((entity) => entity.type === 'timeline_observation').length;
+    summary.textContent = `${allItems.length} 条内容 · ${observations} 次观察 · ${visits} 次访问 · 数据只保存在本机`;
     summary.hidden = false;
-    if (!entities.length) {
-      status.textContent = '还没有本地记录。打开 X 页面后，插件会自动采集可见内容。';
-      status.className = 'status empty';
-      return;
-    }
-    status.textContent = `${entities.length} 条本地记录`;
-    for (const entity of entities) addRecord(entity);
+    status.textContent = allItems.length ? `${allItems.length} 条内容已保存` : '还没有本地记录';
+    renderItems();
   } catch (error) {
+    allItems = [];
+    summary.hidden = true;
     status.textContent = `读取失败：${error.message}`;
-    status.className = 'status error';
+    document.querySelector('.hero').classList.add('error');
   }
 }
 
-loadRecords();
+async function refreshRecords() {
+  status.textContent = '正在同步当前页面…';
+  try {
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (tab?.id && /^https:\/\/(x\.com|twitter\.com)\//.test(tab.url || '')) {
+      let response;
+      try {
+        response = await chrome.tabs.sendMessage(tab.id, { type: 'memory.capture.current' });
+      } catch (error) {
+        if (!error.message.includes('Receiving end does not exist')) throw error;
+        await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ['apps/extension/content.js'] });
+        response = await chrome.tabs.sendMessage(tab.id, { type: 'memory.capture.current' });
+      }
+      if (!response?.ok) throw new Error(response?.error || '无法采集当前页面');
+    }
+    await loadRecords();
+  } catch (error) {
+    await loadRecords();
+    status.textContent = `当前页面同步失败：${error.message}；请刷新 X 页面后重试`;
+    document.querySelector('.hero').classList.add('error');
+  }
+}
+
+let updateTimer;
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area !== 'local' || !Object.keys(changes).some((key) => key.startsWith('xmemory.'))) return;
+  clearTimeout(updateTimer);
+  updateTimer = setTimeout(loadRecords, 250);
+});
+
+refreshRecords();

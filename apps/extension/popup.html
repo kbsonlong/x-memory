@@ -7,26 +7,63 @@
     <link rel="stylesheet" href="popup.css">
   </head>
   <body>
-    <header class="header">
-      <div>
-        <p class="eyebrow">X MEMORY</p>
-        <h1>本地记忆</h1>
+    <header class="app-header">
+      <div class="brand">
+        <div class="brand-mark" aria-hidden="true">✦</div>
+        <div>
+          <p class="eyebrow">X MEMORY</p>
+          <h1>你的内容记忆</h1>
+        </div>
       </div>
       <button id="refresh" class="icon-button" type="button" title="刷新列表" aria-label="刷新列表">↻</button>
     </header>
 
     <main>
-      <div id="status" class="status" role="status">正在读取本地记录…</div>
+      <section class="hero" aria-label="本地状态">
+        <div>
+          <span class="live-dot" aria-hidden="true"></span>
+          <span id="status">正在读取本地记录…</span>
+        </div>
+        <span class="local-badge">LOCAL ONLY</span>
+      </section>
+
       <section id="summary" class="summary" hidden aria-label="记录统计"></section>
+
+      <div class="toolbar">
+        <label class="search-box">
+          <span aria-hidden="true">⌕</span>
+          <input id="search" type="search" placeholder="搜索正文、作者或标签" autocomplete="off">
+        </label>
+        <div class="filters" role="tablist" aria-label="记录筛选">
+          <button class="filter active" data-filter="all" role="tab" aria-selected="true" type="button">全部</button>
+          <button class="filter" data-filter="timeline" role="tab" aria-selected="false" type="button">时间线</button>
+          <button class="filter" data-filter="visited" role="tab" aria-selected="false" type="button">已访问</button>
+        </div>
+      </div>
+
       <section id="records" class="records" aria-live="polite"></section>
     </main>
 
     <template id="record-template">
       <article class="record">
-        <div class="record-meta"></div>
-        <div class="record-title"></div>
+        <div class="record-topline">
+          <span class="record-type"></span>
+          <time class="record-time"></time>
+        </div>
+        <div class="author-row">
+          <div class="avatar" aria-hidden="true"></div>
+          <div class="author-copy">
+            <strong class="author-name"></strong>
+            <span class="author-handle"></span>
+          </div>
+        </div>
         <div class="record-body"></div>
-        <div class="record-time"></div>
+        <button class="more-button" type="button" hidden>展开全文</button>
+        <div class="media-grid" hidden></div>
+        <div class="record-footer">
+          <span class="visit-count"></span>
+          <button class="open-button" type="button">打开原帖 ↗</button>
+        </div>
       </article>
     </template>
 

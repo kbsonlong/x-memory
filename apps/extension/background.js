@@ -17,7 +17,16 @@ export async function handleMessage(message, sender = {}) {
         const observation = await repository.put(makeTimelineObservation({
           id: message.observationId,
           postId: message.post.id,
-          payload: { url: message.post.url },
+          observedAt: message.post.capturedAt,
+          payload: {
+            postId: message.post.id,
+            url: message.post.url,
+            text: message.post.text,
+            authorName: message.post.authorName,
+            authorHandle: message.post.authorHandle,
+            avatarUrl: message.post.avatarUrl,
+            media: message.post.media
+          },
           source: sourceOf(sender, 'x.timeline')
         }));
         return { ok: true, data: { post, observation } };
@@ -49,5 +58,12 @@ if (globalThis.chrome?.runtime?.onMessage) {
   chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     handleMessage(message, sender).then(sendResponse);
     return true;
+  });
+
+  chrome.runtime.onInstalled.addListener(async () => {
+    const tabs = await chrome.tabs.query({ url: ['https://x.com/*', 'https://twitter.com/*'] });
+    await Promise.allSettled(tabs.filter((tab) => tab.id).map((tab) =>
+      chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ['apps/extension/content.js'] })
+    ));
   });
 }
