@@ -1,42 +1,15 @@
-﻿﻿# 全局同步设计
+# S3 同步
 
-## 1. 目标
+## 当前实现
 
-Sync Engine 统一处理所有数据域的本地变更队列、远端读写、游标、重试、冲突、tombstone 和状态展示。UI 不直接访问 S3。
+扩展设置支持 S3 兼容 endpoint、Bucket、Region、Access Key ID、Secret Access Key、可选 Session Token 和对象前缀。点击“立即同步 S3”后，后台用 AWS Signature Version 4 读取并写入 `<prefix>/snapshot.json`。
 
-## 2. 远端分区
+快照包含版本号、更新时间和所有实体。同步按实体 ID 合并远端与本地数据，再把合并结果写回远端和本地仓库。需要 S3 `GetObject` 和 `PutObject` 权限；缺失对象首次读取应返回 404。浏览器扩展来源还需要在 Bucket CORS 规则中允许 GET 和 PUT，并允许 `Authorization`、`Content-Type` 和 `x-amz-*` 请求头。
 
-```text
-manifest.json
-collections/posts/<chunk>.jsonl
-collections/timeline_observations/<chunk>.jsonl
-collections/visit_events/<chunk>.jsonl
-tombstones/<domain>/<chunk>.jsonl
-media/<sha256>
-ai_artifacts/<hash>.json
-```
+## 安全和限制
 
-不能把时间线、足迹和删除标记压成一个无版本的大对象作为最终格式。现有 Footprints 对象格式只作为迁移输入。
-
-## 3. 冲突策略
-
-- `post`：非空字段合并，内容按来源时间和 revision 选择；
-- `timeline_observation`：追加并按 observation ID 去重；
-- `visit_event`：追加并按事件 ID 去重；
-- `tombstone`：删除优先，除非有更晚的合法恢复操作；
-- `ai_artifact`：输入 hash 不变可复用，模型变化允许并存；
-- 配置：明确的 last-write-wins。
-
-## 4. 状态机
-
-```text
-queued → uploading → acknowledged
-queued → failed → retrying → uploading
-queued → cancelled
-```
-
-同步失败只改变同步状态，不删除本地实体。自动同步由 alarm 或后台队列触发，不由卡片渲染触发。
-
-## 5. 凭据和隐私
-
-密钥不得进入实体、日志或远端同步对象。远端未加密时必须明确提示用户；未来可以在 Sync Adapter 层加入客户端加密，但不能在未实现时宣称加密。
+- 凭据只保存在扩展本地存储，不写进同步快照、实体或日志。
+- S3 对象当前未加密。请使用私有 Bucket 和最小权限的专用密钥。
+- 当前 v1 使用单个完整 JSON 快照，没有并发写入锁或条件更新；多个设备同时同步时，最后一次写入可能覆盖另一台设备刚上传的变更。建议先手动串行同步。
+- 大型数据集会受浏览器存储和单对象大小限制；后续可迁移到分区对象格式。
+- 同步失败不会清除本地记录，错误状态会显示在扩展中。

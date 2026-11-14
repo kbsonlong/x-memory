@@ -15,7 +15,10 @@
           <h1>你的内容记忆</h1>
         </div>
       </div>
-      <button id="refresh" class="icon-button" type="button" title="刷新列表" aria-label="刷新列表">↻</button>
+      <div class="header-actions">
+        <button id="settings-toggle" class="icon-button" type="button" title="设置" aria-label="设置">⚙</button>
+        <button id="refresh" class="icon-button" type="button" title="刷新列表" aria-label="刷新列表">↻</button>
+      </div>
     </header>
 
     <main>
@@ -28,6 +31,32 @@
       </section>
 
       <section id="summary" class="summary" hidden aria-label="记录统计"></section>
+
+      <section id="settings-panel" class="settings-panel" hidden>
+        <div class="settings-heading"><strong>AI 总结</strong><span>API Key 仅保存在本机</span></div>
+        <label>API 地址<input id="ai-endpoint" type="url" placeholder="https://api.openai.com/v1/chat/completions"></label>
+        <div class="settings-row">
+          <label>模型<input id="ai-model" type="text" placeholder="gpt-4o-mini"></label>
+          <label>API Key<input id="ai-key" type="password" autocomplete="off" placeholder="留空则保留已保存的 Key"></label>
+        </div>
+        <div class="settings-heading"><strong>S3 同步</strong><span>对象存储需支持 S3 API</span></div>
+        <label>Endpoint<input id="s3-endpoint" type="url" placeholder="https://s3.example.com"></label>
+        <div class="settings-row">
+          <label>Bucket<input id="s3-bucket" type="text"></label>
+          <label>Region<input id="s3-region" type="text" placeholder="us-east-1"></label>
+        </div>
+        <label>Access Key ID<input id="s3-access-key" type="text" autocomplete="off"></label>
+        <label>Secret Access Key<input id="s3-secret-key" type="password" autocomplete="off" placeholder="留空则保留已保存的密钥"></label>
+        <div class="settings-row">
+          <label>Session Token（可选）<input id="s3-session-token" type="password" autocomplete="off"></label>
+          <label>对象前缀<input id="s3-prefix" type="text" placeholder="x-memory"></label>
+        </div>
+        <p class="privacy-note">同步会把记录上传到所填的 S3 存储桶；对象内容未加密。AI 总结会把所选帖子正文发送到配置的 AI 服务。</p>
+        <div class="settings-actions">
+          <button id="save-settings" type="button">保存设置</button>
+          <button id="sync-now" type="button">立即同步 S3</button>
+        </div>
+      </section>
 
       <div class="toolbar">
         <label class="search-box">
@@ -48,6 +77,7 @@
       <article class="record">
         <div class="record-topline">
           <span class="record-type"></span>
+          <span class="visited-badge" hidden>已访问</span>
           <time class="record-time"></time>
         </div>
         <div class="author-row">
@@ -60,8 +90,10 @@
         <div class="record-body"></div>
         <button class="more-button" type="button" hidden>展开全文</button>
         <div class="media-grid" hidden></div>
+        <div class="ai-summary" hidden><strong>AI 总结</strong><p></p></div>
         <div class="record-footer">
           <span class="visit-count"></span>
+          <button class="summarize-button" type="button">AI 总结</button>
           <button class="open-button" type="button">打开原帖 ↗</button>
         </div>
       </article>

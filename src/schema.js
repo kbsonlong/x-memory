@@ -95,6 +95,11 @@ export function makeVisitEvent({ id, postId: rawPostId, payload = {}, source = {
   });
 }
 
+export function makeAiArtifact({ id, payload = {}, source = { adapter: 'ai.orchestrator' }, observedAt, at }) {
+  if (typeof id !== 'string' || !id.startsWith('ai:summary:')) throw new TypeError('AI artifact id must start with ai:summary:');
+  return base({ id, type: 'ai_artifact', domain: 'ai', observedAt, source, payload, at });
+}
+
 export function makeTombstone({ entityId, domain, deletedAt = now(), source = {} }) {
   if (!entityId || typeof entityId !== 'string') throw new TypeError('entityId is required');
   return base({

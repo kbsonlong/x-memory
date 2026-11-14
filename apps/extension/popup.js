@@ -4,6 +4,7 @@ const records = document.querySelector('#records');
 const template = document.querySelector('#record-template');
 const searchInput = document.querySelector('#search');
 const filters = [...document.querySelectorAll('.filter')];
+const settingsPanel = document.querySelector('#settings-panel');
 let activeFilter = 'all';
 let allItems = [];
 
@@ -20,6 +21,12 @@ for (const button of filters) {
 }
 
 document.querySelector('#refresh').addEventListener('click', refreshRecords);
+document.querySelector('#settings-toggle').addEventListener('click', () => {
+  settingsPanel.hidden = !settingsPanel.hidden;
+  if (!settingsPanel.hidden) loadSettings();
+});
+document.querySelector('#save-settings').addEventListener('click', saveSettings);
+document.querySelector('#sync-now').addEventListener('click', syncNow);
 searchInput.addEventListener('input', renderItems);
 
 function send(message) {
@@ -34,10 +41,6 @@ function send(message) {
 
 function payloadOf(entity) {
   return entity?.payload && typeof entity.payload === 'object' ? entity.payload : {};
-}
-
-function postIdOf(entity) {
-  return String(payloadOf(entity).postId || entity?.subject?.postId || entity?.id?.replace(/^post:/, '') || '').trim();
 }
 
 function timestampOf(entity) {
@@ -87,22 +90,6 @@ function mediaFrom(payload) {
   return result.slice(0, 4);
 }
 
-function mergeItems(entities) {
-  const posts = new Map();
-  for (const entity of entities) {
-    const id = postIdOf(entity) || entity.id;
-    let item = posts.get(id);
-    if (!item) {
-      item = { id, post: null, observations: [], visits: [] };
-      posts.set(id, item);
-    }
-    if (entity.type === 'post') item.post = entity;
-    if (entity.type === 'timeline_observation') item.observations.push(entity);
-    if (entity.type === 'visit_event') item.visits.push(entity);
-  }
-  return [...posts.values()].sort((a, b) => itemTimestamp(b).localeCompare(itemTimestamp(a)));
-}
-
 function entitiesOf(item) {
   return [item.post, ...item.observations, ...item.visits].filter(Boolean);
 }
@@ -127,7 +114,7 @@ function mergedPayload(item) {
 }
 
 function searchableText(item) {
-  const values = entitiesOf(item).flatMap((entity) => {
+  const values = [...entitiesOf(item), ...(item.summaries || [])].flatMap((entity) => {
     const payload = payloadOf(entity);
     return [payload.text, payload.authorName, payload.authorHandle, payload.postId, payload.url];
   });
@@ -167,7 +154,6 @@ function createMedia(mediaGrid, media) {
 function addRecord(item) {
   const node = template.content.cloneNode(true);
   const record = node.querySelector('.record');
-  const source = item.post || item.observations.at(-1) || item.visits.at(-1);
   const payload = mergedPayload(item);
   const postId = item.id;
   const text = String(payload.text || '').trim();
@@ -176,7 +162,8 @@ function addRecord(item) {
   const url = safeUrl(payload.url) || (postId.match(/^\d+$/) ? `https://x.com/i/status/${postId}` : '');
   const media = mediaFrom(payload);
 
-  node.querySelector('.record-type').textContent = item.visits.length ? '已访问 · 时间线' : '时间线记录';
+  node.querySelector('.record-type').textContent = item.post || item.observations.length ? '时间线记录' : '访问记录';
+  node.querySelector('.visited-badge').hidden = !item.visits.length;
   node.querySelector('.record-time').textContent = formatTime(itemTimestamp(item));
   node.querySelector('.author-name').textContent = authorName;
   node.querySelector('.author-handle').textContent = handle;
@@ -209,6 +196,27 @@ function addRecord(item) {
 
   createMedia(node.querySelector('.media-grid'), media);
   node.querySelector('.visit-count').textContent = item.visits.length ? `访问 ${item.visits.length} 次` : '仅本地保存';
+  const summaryBox = node.querySelector('.ai-summary');
+  const summaryArtifact = item.summaries?.[0];
+  if (summaryArtifact?.payload?.text) {
+    summaryBox.hidden = false;
+    summaryBox.querySelector('p').textContent = summaryArtifact.payload.text;
+  }
+  const summarize = node.querySelector('.summarize-button');
+  summarize.addEventListener('click', async () => {
+    summarize.disabled = true;
+    summarize.textContent = '正在总结…';
+    try {
+      const response = await send({ type: 'memory.ai.summarize', postId });
+      if (!response?.ok) throw new Error(response?.error?.message || '总结失败');
+      await loadRecords();
+      status.textContent = 'AI 总结已保存';
+    } catch (error) {
+      status.textContent = `AI 总结失败：${error.message}`;
+      summarize.disabled = false;
+      summarize.textContent = '重试总结';
+    }
+  });
   const open = node.querySelector('.open-button');
   if (url) {
     open.addEventListener('click', () => chrome.tabs.create({ url }));
@@ -237,13 +245,12 @@ async function loadRecords() {
   document.querySelector('.hero').classList.remove('error');
   records.replaceChildren();
   try {
-    const response = await send({ type: 'memory.query.search', query: '', limit: null });
+    const response = await send({ type: 'memory.query.feed' });
     if (!response?.ok) throw new Error(response?.error?.message || '读取失败');
-    const entities = response.data ?? [];
-    allItems = mergeItems(entities);
-    const visits = entities.filter((entity) => entity.type === 'visit_event').length;
-    const observations = entities.filter((entity) => entity.type === 'timeline_observation').length;
-    summary.textContent = `${allItems.length} 条内容 · ${observations} 次观察 · ${visits} 次访问 · 数据只保存在本机`;
+    allItems = response.data ?? [];
+    const visits = allItems.reduce((count, item) => count + item.visits.length, 0);
+    const observations = allItems.reduce((count, item) => count + item.observations.length, 0);
+    summary.textContent = `${allItems.length} 条帖子 · ${observations} 次观察 · ${visits} 次访问`;
     summary.hidden = false;
     status.textContent = allItems.length ? `${allItems.length} 条内容已保存` : '还没有本地记录';
     renderItems();
@@ -252,6 +259,92 @@ async function loadRecords() {
     summary.hidden = true;
     status.textContent = `读取失败：${error.message}`;
     document.querySelector('.hero').classList.add('error');
+  }
+}
+
+async function loadSettings() {
+  try {
+    const response = await send({ type: 'memory.settings.get' });
+    if (!response?.ok) throw new Error(response?.error?.message || '读取设置失败');
+    const value = response.data;
+    document.querySelector('.local-badge').textContent = value.s3.endpoint && value.s3.bucket ? 'LOCAL + S3' : 'LOCAL ONLY';
+    document.querySelector('#ai-endpoint').value = value.aiEndpoint || '';
+    document.querySelector('#ai-model').value = value.aiModel || '';
+    document.querySelector('#ai-key').placeholder = value.aiApiKey ? '已配置；留空保持不变' : '粘贴 AI API Key';
+    document.querySelector('#s3-endpoint').value = value.s3.endpoint || '';
+    document.querySelector('#s3-bucket').value = value.s3.bucket || '';
+    document.querySelector('#s3-region').value = value.s3.region || 'us-east-1';
+    document.querySelector('#s3-access-key').value = value.s3.accessKeyId || '';
+    document.querySelector('#s3-secret-key').placeholder = value.s3.secretAccessKey ? '已配置；留空保持不变' : 'Secret Access Key';
+    document.querySelector('#s3-session-token').placeholder = value.s3.sessionToken ? '已配置；留空保持不变' : 'Session Token';
+    document.querySelector('#s3-prefix').value = value.s3.prefix || 'x-memory';
+  } catch (error) {
+    status.textContent = `读取设置失败：${error.message}`;
+  }
+}
+
+function endpointOrigin(value) {
+  if (!value.trim()) return '';
+  const url = new URL(value.trim());
+  if (!['https:', 'http:'].includes(url.protocol)) throw new Error('服务地址必须使用 HTTP 或 HTTPS');
+  if (url.protocol === 'http:' && !['localhost', '127.0.0.1'].includes(url.hostname)) throw new Error('远程服务地址必须使用 HTTPS');
+  return `${url.origin}/*`;
+}
+
+async function saveSettings() {
+  const button = document.querySelector('#save-settings');
+  button.disabled = true;
+  try {
+    const aiEndpoint = document.querySelector('#ai-endpoint').value.trim() || 'https://api.openai.com/v1/chat/completions';
+    const s3Endpoint = document.querySelector('#s3-endpoint').value.trim();
+    const origins = [...new Set([endpointOrigin(aiEndpoint), endpointOrigin(s3Endpoint)].filter(Boolean))];
+    if (origins.length && chrome.permissions?.request) {
+      const granted = await chrome.permissions.request({ origins });
+      if (!granted) throw new Error('需要允许访问配置的 AI 或 S3 服务地址');
+    }
+    const response = await send({
+      type: 'memory.settings.save',
+      settings: {
+        aiEndpoint,
+        aiModel: document.querySelector('#ai-model').value.trim() || 'gpt-4o-mini',
+        aiApiKey: document.querySelector('#ai-key').value.trim(),
+        s3: {
+          endpoint: s3Endpoint,
+          bucket: document.querySelector('#s3-bucket').value.trim(),
+          region: document.querySelector('#s3-region').value.trim() || 'us-east-1',
+          accessKeyId: document.querySelector('#s3-access-key').value.trim(),
+          secretAccessKey: document.querySelector('#s3-secret-key').value.trim(),
+          sessionToken: document.querySelector('#s3-session-token').value.trim(),
+          prefix: document.querySelector('#s3-prefix').value.trim() || 'x-memory'
+        }
+      }
+    });
+    if (!response?.ok) throw new Error(response?.error?.message || '保存失败');
+    document.querySelector('#ai-key').value = '';
+    document.querySelector('#s3-secret-key').value = '';
+    document.querySelector('#s3-session-token').value = '';
+    await loadSettings();
+    status.textContent = '设置已保存在本机';
+  } catch (error) {
+    status.textContent = `保存设置失败：${error.message}`;
+  } finally {
+    button.disabled = false;
+  }
+}
+
+async function syncNow() {
+  const button = document.querySelector('#sync-now');
+  button.disabled = true;
+  status.textContent = '正在与 S3 同步…';
+  try {
+    const response = await send({ type: 'memory.sync.run' });
+    if (!response?.ok) throw new Error(response?.error?.message || 'S3 同步失败');
+    await loadRecords();
+    status.textContent = `S3 同步完成 · ${response.data.uploaded} 条记录`;
+  } catch (error) {
+    status.textContent = `S3 同步失败：${error.message}`;
+  } finally {
+    button.disabled = false;
   }
 }
 
@@ -286,3 +379,4 @@ chrome.storage.onChanged.addListener((changes, area) => {
 });
 
 refreshRecords();
+loadSettings();

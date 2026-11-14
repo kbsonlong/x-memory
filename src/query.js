@@ -12,10 +12,32 @@ export class QueryService {
     ]);
     return {
       post: post ?? null,
-      observations: observations.slice(0, limit),
-      visits: visits.slice(0, limit),
+      observations: limit == null ? observations : observations.slice(0, limit),
+      visits: limit == null ? visits : visits.slice(0, limit),
       counts: { observations: observations.length, visits: visits.length }
     };
+  }
+
+  async getFeed() {
+    const entities = await this.repository.list();
+    const posts = new Map();
+    for (const entity of entities) {
+      const postId = String(entity.payload?.postId || entity.subject?.postId || (entity.type === 'post' ? entity.id.replace(/^post:/, '') : '')).trim();
+      if (!postId) continue;
+      if (entity.type === 'ai_artifact') {
+        if (entity.payload?.task !== 'summarize') continue;
+      } else if (!['post', 'timeline_observation', 'visit_event'].includes(entity.type)) continue;
+      let item = posts.get(postId);
+      if (!item) {
+        item = { id: postId, post: null, observations: [], visits: [], summaries: [] };
+        posts.set(postId, item);
+      }
+      if (entity.type === 'post') item.post = entity;
+      if (entity.type === 'timeline_observation') item.observations.push(entity);
+      if (entity.type === 'visit_event') item.visits.push(entity);
+      if (entity.type === 'ai_artifact') item.summaries.push(entity);
+    }
+    return [...posts.values()].sort((a, b) => feedTimestamp(b).localeCompare(feedTimestamp(a)));
   }
 
   async getByRefs(refs = []) {
@@ -37,4 +59,11 @@ export class QueryService {
       return JSON.stringify(entity.payload).toLocaleLowerCase().includes(needle);
     }).slice(0, limit ?? undefined);
   }
+}
+
+function feedTimestamp(item) {
+  return [item.post, ...item.observations, ...item.visits, ...item.summaries]
+    .filter(Boolean)
+    .map((entity) => entity.observedAt || entity.updatedAt || '')
+    .sort((a, b) => String(b).localeCompare(String(a)))[0] || '';
 }

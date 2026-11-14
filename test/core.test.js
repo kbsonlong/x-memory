@@ -1,11 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { makePost, makeTimelineObservation, makeVisitEvent } from '../src/schema.js';
+import { makeAiArtifact, makePost, makeTimelineObservation, makeVisitEvent } from '../src/schema.js';
 import { MemoryStore, Repository } from '../src/repository.js';
 import { QueryService } from '../src/query.js';
 import { migrateLegacy, migrateRepository } from '../src/migration.js';
-import { createAiOrchestrator } from '../src/ai.js';
-import { SyncEngine } from '../src/sync.js';
+import { createAiOrchestrator, createOpenAiCompatibleProvider } from '../src/ai.js';
+import { S3SnapshotTransport, SyncEngine } from '../src/sync.js';
 
 function setup() {
   const repository = new Repository(new MemoryStore());
@@ -50,6 +50,20 @@ test('query joins a post with observations and visits by postId', async () => {
   assert.equal(result.counts.visits, 1);
 });
 
+test('feed groups timeline, visits, and AI summaries into one item per post', async () => {
+  const { repository, query } = setup();
+  await repository.put(makePost({ id: '123', payload: { text: 'hello' } }));
+  await repository.put(makeTimelineObservation({ id: 'page-1', postId: '123' }));
+  await repository.put(makeVisitEvent({ id: 'device-a:123:1', postId: '123' }));
+  await repository.put(makeAiArtifact({ id: 'ai:summary:hash:model', payload: { postId: '123', task: 'summarize', text: '总结' } }));
+  const feed = await query.getFeed();
+  assert.equal(feed.length, 1);
+  assert.equal(feed[0].id, '123');
+  assert.equal(feed[0].observations.length, 1);
+  assert.equal(feed[0].visits.length, 1);
+  assert.equal(feed[0].summaries.length, 1);
+});
+
 test('legacy migration is deterministic and skips invalid records', () => {
   const entities = migrateLegacy({
     items: [{ id: '123', text: 'one' }, { id: 'bad' }],
@@ -79,12 +93,56 @@ test('AI excludes footprints unless explicitly authorized', async () => {
   assert.deepEqual(result.inputRefs, ['post:123']);
 });
 
+test('OpenAI-compatible provider sends bounded post text and returns the summary', async () => {
+  let call;
+  const provider = createOpenAiCompatibleProvider({ fetchImpl: async (url, options) => {
+    call = { url, options };
+    return { ok: true, json: async () => ({ model: 'model-v1', choices: [{ message: { content: '帖子总结' } }] }) };
+  } });
+  const result = await provider({
+    task: 'summarize',
+    entities: [{ id: 'post:123', type: 'post', payload: { text: '原帖内容', authorName: '作者' } }],
+    settings: { aiEndpoint: 'https://ai.example.test/v1/chat/completions', aiApiKey: 'secret', aiModel: 'custom-model' }
+  });
+  assert.equal(result.text, '帖子总结');
+  assert.equal(result.model, 'model-v1');
+  assert.equal(call.url, 'https://ai.example.test/v1/chat/completions');
+  assert.equal(call.options.headers.Authorization, 'Bearer secret');
+  assert.match(call.options.body, /原帖内容/);
+});
+
 test('sync without transport preserves local-only state', async () => {
   const { repository } = setup();
   const sync = new SyncEngine({ repository });
-  sync.enqueue(makePost({ id: '123' }));
-  assert.deepEqual(sync.status(), { state: 'idle', queued: 1 });
-  const result = await sync.flush();
+  await repository.put(makePost({ id: '123' }));
+  assert.deepEqual(sync.status(), { state: 'idle' });
+  const result = await sync.sync();
   assert.equal(result.state, 'offline');
-  assert.equal(result.flushed, 0);
+  assert.equal((await repository.list({ type: 'post' })).length, 1);
+});
+
+test('S3 snapshot sync signs requests and merges remote and local entities', async () => {
+  const { repository } = setup();
+  const remoteEntity = makePost({ id: '123', payload: { text: 'remote copy' }, at: '2026-01-01T00:00:00.000Z' });
+  const localEntity = makeVisitEvent({ id: 'device-a:123:1', postId: '123', payload: { visitedAt: '2026-11-14T00:00:00Z' } });
+  await repository.put(localEntity);
+  let stored = { version: 1, entities: [remoteEntity] };
+  const calls = [];
+  const fetchImpl = async (url, options) => {
+    calls.push({ url, options });
+    assert.match(options.headers.Authorization, /^AWS4-HMAC-SHA256 Credential=test-key\//);
+    assert.match(options.headers.Authorization, /SignedHeaders=host;x-amz-content-sha256;x-amz-date/);
+    if (options.method === 'GET') return { status: 200, ok: true, json: async () => stored };
+    stored = JSON.parse(options.body);
+    return { status: 200, ok: true };
+  };
+  const transport = new S3SnapshotTransport({ endpoint: 'https://s3.example.test', bucket: 'memory', region: 'us-east-1', accessKeyId: 'test-key', secretAccessKey: 'test-secret', fetchImpl, cryptoImpl: globalThis.crypto });
+  const sync = new SyncEngine({ repository, transport });
+  const result = await sync.sync();
+  assert.equal(calls.length, 2);
+  assert.match(calls[0].url, /\/memory\/x-memory\/snapshot\.json$/);
+  assert.equal(result.downloaded, 1);
+  assert.equal(result.uploaded, 2);
+  assert.deepEqual(new Set(stored.entities.map((entity) => entity.id)), new Set(['post:123', 'visit:device-a:123:1']));
+  assert.equal((await repository.get('post:123')).payload.text, 'remote copy');
 });
