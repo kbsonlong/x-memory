@@ -35,6 +35,7 @@ document.querySelector('#page-next').addEventListener('click', () => changePage(
 document.querySelector('#save-settings').addEventListener('click', saveSettings);
 document.querySelector('#sync-now').addEventListener('click', syncNow);
 document.querySelector('#generate-digest').addEventListener('click', generateDailyDigest);
+document.querySelector('#test-digest-push').addEventListener('click', testDigestPush);
 document.querySelector('#export-json').addEventListener('click', () => exportData('json'));
 document.querySelector('#export-csv').addEventListener('click', () => exportData('csv'));
 digestDate.addEventListener('change', loadDailyDigest);
@@ -322,6 +323,25 @@ async function generateDailyDigest() {
   } finally {
     button.disabled = false;
     button.textContent = '生成知识日报';
+  }
+}
+
+async function testDigestPush() {
+  const button = document.querySelector('#test-digest-push');
+  button.disabled = true;
+  button.textContent = '正在总结最近记录并推送…';
+  status.textContent = '正在读取最近帖子并测试推送…';
+  try {
+    const response = await send({ type: 'memory.ai.test-digest-push' });
+    if (!response?.ok) throw new Error(response?.error?.message || '测试推送失败');
+    renderDailyDigest(response.data.artifact);
+    const channels = response.data.channels.map((channel) => channel === 'telegram' ? 'Telegram' : 'Webhook').join('、');
+    status.textContent = `测试推送成功 · 最近 ${response.data.sampleCount} 条记录 · ${channels}`;
+  } catch (error) {
+    status.textContent = `测试推送失败：${error.message}`;
+  } finally {
+    button.disabled = false;
+    button.textContent = '测试推送（总结最近记录）';
   }
 }
 

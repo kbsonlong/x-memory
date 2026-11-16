@@ -90,7 +90,8 @@ main { padding: 0 14px 18px; }
 .daily-heading span { color: var(--muted); font-size: 10px; }
 #digest-date { width: 126px; height: 30px; padding: 0 6px; border: 1px solid #cfd9de; border-radius: 8px; background: #fff; color: #0f1419; font: inherit; font-size: 10px; }
 .digest-button { min-height: 34px; border: 0; border-radius: 9px; color: #fff; background: #0f1419; font-size: 11px; font-weight: 700; }
-.digest-button:disabled { opacity: .55; cursor: wait; }
+.digest-test-button { min-height: 32px; border: 1px solid #cfd9de; border-radius: 9px; color: #0f1419; background: #fff; font-size: 11px; font-weight: 600; }
+.digest-button:disabled, .digest-test-button:disabled { opacity: .55; cursor: wait; }
 .daily-report { display: grid; gap: 9px; color: #0f1419; }
 .daily-report[hidden] { display: none; }
 .digest-overall { margin: 0; font-size: 11px; line-height: 1.55; }

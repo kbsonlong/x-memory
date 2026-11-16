@@ -53,6 +53,8 @@ export async function handleMessage(message, sender = {}) {
       }
       case 'memory.ai.daily-digest':
         return { ok: true, data: await generateDailyDigest(message.date) };
+      case 'memory.ai.test-digest-push':
+        return { ok: true, data: await testRecentDigestPush() };
       case 'memory.ai.get-daily-digest':
         return { ok: true, data: await getDailyDigest(message.date) };
       case 'rewind.capture': {
@@ -171,12 +173,14 @@ async function runScheduledDigest() {
   await chrome.storage.local.set({ 'xmemory.scheduler.lastRunDate': date });
 }
 
-async function pushDailyDigest(webhook, artifact) {
+async function pushDailyDigest(webhook, artifact, { test = false } = {}) {
   const payload = artifact?.payload || {};
   const report = payload.report || { overall: payload.text || '' };
   const date = payload.date || localDateOf(new Date());
+  const title = `X Memory · ${test ? '推送测试 · ' : ''}${date} 知识日报`;
   const text = [
-    `X Memory · ${date} 知识日报`,
+    ...(test ? ['🧪 推送测试（基于最近记录）'] : []),
+    title,
     report.overall || '今日知识日报已生成。',
     ...(Array.isArray(report.interestDirections) ? report.interestDirections.map((item) => `兴趣方向：${item.direction || item.category || ''} — ${item.summary || item.evidence || ''}`) : [])
   ].join('\n').slice(0, 3900);
@@ -185,7 +189,7 @@ async function pushDailyDigest(webhook, artifact) {
     const response = await fetch(webhook.url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ event: 'daily_digest', date, title: `X Memory · ${date} 知识日报`, text, report, stats: payload.stats || {} })
+      body: JSON.stringify({ event: test ? 'daily_digest_test' : 'daily_digest', date, title, text, report, stats: payload.stats || {} })
     });
     if (!response.ok) throw new Error(`Webhook 推送失败（HTTP ${response.status}）`);
     results.push('webhook');
@@ -202,6 +206,45 @@ async function pushDailyDigest(webhook, artifact) {
     results.push('telegram');
   }
   return results;
+}
+
+async function testRecentDigestPush() {
+  const settings = await getSettings();
+  const webhook = settings.webhook;
+  if (!webhook.url && !(webhook.telegramBotToken && webhook.telegramChatId)) {
+    throw new Error('请先在设置中配置 Webhook URL 或 Telegram Bot Token 与 Chat ID');
+  }
+  const [timeline, visits] = await Promise.all([
+    repository.list({ type: 'timeline_observation' }),
+    repository.list({ type: 'visit_event' })
+  ]);
+  const timelineSample = timeline.slice(0, 3);
+  const visitSample = visits.slice(0, 3);
+  const entities = [...timelineSample, ...visitSample];
+  if (!entities.length) throw new Error('本地还没有可用于测试的帖子记录');
+  const date = localDateOf(new Date());
+  const stats = {
+    timelinePosts: timelineSample.length,
+    timelineObservations: timelineSample.length,
+    visitedPosts: visitSample.length,
+    visitEvents: visitSample.length,
+    sampledTimelinePosts: timelineSample.length,
+    sampledVisitedPosts: visitSample.length
+  };
+  const result = await ai.run({
+    task: 'daily_digest',
+    context: { entityRefs: entities.map((entity) => entity.id), reportDate: date, stats },
+    options: { language: 'zh-CN', model: settings.aiModel, maxTokens: 1400, includeFootprints: true },
+    settings
+  });
+  const artifact = {
+    payload: {
+      task: 'daily_digest_test', date, report: result.result.report, text: result.result.text,
+      model: result.result.model, stats
+    }
+  };
+  const channels = await pushDailyDigest(webhook, artifact, { test: true });
+  return { artifact, channels, sampleCount: entities.length };
 }
 
 async function generateDailyDigest(rawDate) {
