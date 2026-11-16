@@ -58,7 +58,7 @@ export function createOpenAiCompatibleProvider({ fetchImpl = globalThis.fetch } 
       })
     });
     if (!response.ok) {
-      throw new Error(`AI 请求失败 (${response.status})`);
+      throw new Error(await describeProviderError(response, { model, apiKey }));
     }
     const data = await response.json();
     const text = String(data.choices?.[0]?.message?.content || '').trim();
@@ -74,6 +74,26 @@ export function createOpenAiCompatibleProvider({ fetchImpl = globalThis.fetch } 
     }
     return { text, report, model: data.model || model };
   };
+}
+
+async function describeProviderError(response, { model, apiKey }) {
+  let raw = '';
+  try { raw = await response.text(); } catch {}
+  let detail = raw;
+  let code = '';
+  try {
+    const data = JSON.parse(raw);
+    const error = data.error || data;
+    detail = typeof error === 'string' ? error : error.message || error.msg || error.error_description || raw;
+    code = typeof error === 'object' ? error.code || error.type || '' : '';
+  } catch {}
+  detail = String(detail || '').replaceAll(apiKey, '[API Key 已隐藏]').trim().slice(0, 360);
+  const modelFailure = /model[_\s-]*not[_\s-]*found|model.{0,80}(does not exist|not found|unavailable|no access)/i.test(`${code} ${detail}`);
+  if (modelFailure) {
+    const reason = detail && !/model[_\s-]*not[_\s-]*found/i.test(detail) ? `：${detail}` : '';
+    return `模型“${model}”未找到，请检查模型名称和服务商权限${reason}`;
+  }
+  return `AI 请求失败 (${response.status})${detail ? `：${detail}` : ''}`;
 }
 
 function validateRequest(request) {
