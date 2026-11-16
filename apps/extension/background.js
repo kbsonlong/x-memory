@@ -186,13 +186,27 @@ async function pushDailyDigest(webhook, artifact, { test = false } = {}) {
   ].join('\n').slice(0, 3900);
   const results = [];
   if (webhook.url) {
+    const wecom = isWeComWebhook(webhook.url);
+    const body = wecom
+      ? { msgtype: 'markdown', markdown: { content: truncateUtf8(text, 3800) } }
+      : { event: test ? 'daily_digest_test' : 'daily_digest', date, title, text, report, stats: payload.stats || {} };
     const response = await fetch(webhook.url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ event: test ? 'daily_digest_test' : 'daily_digest', date, title, text, report, stats: payload.stats || {} })
+      body: JSON.stringify(body)
     });
-    if (!response.ok) throw new Error(`Webhook 推送失败（HTTP ${response.status}）`);
-    results.push('webhook');
+    if (!response.ok) throw new Error(`${wecom ? '企微' : 'Webhook'} 推送失败（HTTP ${response.status}）`);
+    if (wecom) {
+      let result;
+      try { result = await response.json(); } catch {}
+      if (result?.errcode !== 0) {
+        const reason = result?.errmsg || '未收到有效确认';
+        throw new Error(`企微未接收消息（${reason}，错误码 ${result?.errcode ?? '未知'}）`);
+      }
+      results.push('wecom');
+    } else {
+      results.push('webhook');
+    }
   }
   if (webhook.telegramBotToken && webhook.telegramChatId) {
     const response = await fetch(`https://api.telegram.org/bot${webhook.telegramBotToken}/sendMessage`, {
@@ -206,6 +220,28 @@ async function pushDailyDigest(webhook, artifact, { test = false } = {}) {
     results.push('telegram');
   }
   return results;
+}
+
+function isWeComWebhook(value) {
+  try {
+    const url = new URL(value);
+    return url.hostname === 'qyapi.weixin.qq.com' && url.pathname === '/cgi-bin/webhook/send';
+  } catch {
+    return false;
+  }
+}
+
+function truncateUtf8(value, maxBytes) {
+  const encoder = new TextEncoder();
+  let result = '';
+  let size = 0;
+  for (const character of value) {
+    const length = encoder.encode(character).length;
+    if (size + length > maxBytes) break;
+    result += character;
+    size += length;
+  }
+  return result;
 }
 
 async function testRecentDigestPush() {

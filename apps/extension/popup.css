@@ -92,6 +92,9 @@ main { padding: 0 14px 18px; }
 .digest-button { min-height: 34px; border: 0; border-radius: 9px; color: #fff; background: #0f1419; font-size: 11px; font-weight: 700; }
 .digest-test-button { min-height: 32px; border: 1px solid #cfd9de; border-radius: 9px; color: #0f1419; background: #fff; font-size: 11px; font-weight: 600; }
 .digest-button:disabled, .digest-test-button:disabled { opacity: .55; cursor: wait; }
+.push-result { padding: 8px 9px; border-radius: 8px; color: #087b56; background: #d9f8ea; font-size: 10px; line-height: 1.4; overflow-wrap: anywhere; }
+.push-result.error { color: #9b2532; background: #fff0f0; }
+.push-result[hidden] { display: none; }
 .daily-report { display: grid; gap: 9px; color: #0f1419; }
 .daily-report[hidden] { display: none; }
 .digest-overall { margin: 0; font-size: 11px; line-height: 1.55; }

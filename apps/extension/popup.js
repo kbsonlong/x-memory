@@ -328,16 +328,25 @@ async function generateDailyDigest() {
 
 async function testDigestPush() {
   const button = document.querySelector('#test-digest-push');
+  const resultNode = document.querySelector('#digest-push-result');
   button.disabled = true;
   button.textContent = '正在总结最近记录并推送…';
+  resultNode.hidden = false;
+  resultNode.classList.remove('error');
+  resultNode.textContent = '正在读取最近帖子、生成总结并推送…';
   status.textContent = '正在读取最近帖子并测试推送…';
   try {
     const response = await send({ type: 'memory.ai.test-digest-push' });
     if (!response?.ok) throw new Error(response?.error?.message || '测试推送失败');
     renderDailyDigest(response.data.artifact);
-    const channels = response.data.channels.map((channel) => channel === 'telegram' ? 'Telegram' : 'Webhook').join('、');
-    status.textContent = `测试推送成功 · 最近 ${response.data.sampleCount} 条记录 · ${channels}`;
+    const channelNames = { telegram: 'Telegram', wecom: '企微', webhook: 'Webhook' };
+    const channels = response.data.channels.map((channel) => channelNames[channel] || channel).join('、');
+    const message = `推送成功：${channels} · 已总结最近 ${response.data.sampleCount} 条记录`;
+    resultNode.textContent = message;
+    status.textContent = message;
   } catch (error) {
+    resultNode.classList.add('error');
+    resultNode.textContent = error.message;
     status.textContent = `测试推送失败：${error.message}`;
   } finally {
     button.disabled = false;
