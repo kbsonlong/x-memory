@@ -199,7 +199,13 @@ function addRecord(item) {
   node.querySelector('.record-time').textContent = formatTime(itemTimestamp(item));
   node.querySelector('.author-name').textContent = authorName;
   node.querySelector('.author-handle').textContent = handle;
-  node.querySelector('.record-body').textContent = text || '这条记录没有提取到正文。打开原帖可以查看完整内容。';
+  const mediaDescriptions = media.map((image) => image.alt).filter((alt) => alt && alt !== '帖子图片');
+  const emptyText = mediaDescriptions.length
+    ? `图片说明：${mediaDescriptions.join('；')}`
+    : media.length
+      ? '已保存图片/视频；X 未提供可提取的文字正文。'
+      : '这条记录没有提取到正文。打开原帖可以查看完整内容。';
+  node.querySelector('.record-body').textContent = text || emptyText;
   if (!text) record.classList.add('no-text');
 
   const body = node.querySelector('.record-body');

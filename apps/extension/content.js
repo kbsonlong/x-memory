@@ -84,8 +84,12 @@
   }
 
   function textFrom(article) {
-    const text = article.querySelector('[data-testid="tweetText"]')?.innerText?.trim();
-    return (text || '').slice(0, 12000);
+    const text = [...article.querySelectorAll('[data-testid="tweetText"]')]
+      .map((node) => node.innerText || node.textContent || '')
+      .map((value) => value.trim())
+      .filter(Boolean)
+      .join('\n\n');
+    return text.slice(0, 12000);
   }
 
   function authorFrom(article) {
@@ -114,7 +118,7 @@
       const url = absoluteUrl(image.currentSrc || image.src || '');
       if (!url || !/pbs\.twimg\.com\/(media|amplify_video)/.test(url) || seen.has(url)) continue;
       seen.add(url);
-      result.push({ url, alt: image.alt || '帖子图片' });
+      result.push({ url, alt: image.alt?.trim() || image.getAttribute('aria-label')?.trim() || '帖子图片' });
     }
     return result.slice(0, 4);
   }
