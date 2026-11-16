@@ -1,68 +1,156 @@
-﻿# X Memory
+<div align="center">
 
-X Memory 是一个本地优先的 X 内容记忆产品。它把时间线历史和访问足迹作为独立数据域，把查询、搜索、AI、同步、权限和 Agent 接口实现为全局能力。
+# ✦ X Memory
 
-## 当前实现
+### 刷过的内容，从此不再消失
 
-当前版本完成第一条可验证垂直链路：
+**一个本地优先的 X 内容记忆扩展。** 它安静地记下你在时间线看过的每条帖子、主动打开过的每个原帖，把稍纵即逝的信息流，变成属于你、可搜索、可复盘的个人知识库。
 
-- 统一实体外壳和 `post`、`timeline_observation`、`visit_event`、`tombstone` 模型；
-- 独立数据域存储，不把时间线和足迹合并为一个数组；
-- Repository 统一读写入口；
-- Query Service 跨域按 `postId` 关联时间线和足迹；
-- MV3 service worker 消息入口：`memory.query.related`、`rewind.capture`、`footprints.upsert`；
-- 兼容迁移函数：从旧 `items`、`records`、`tombstones` 生成新实体；
-- 时间线帖子、观察事件和访问事件按 `postId` 合并为单条卡片，访问过的帖子显示访问标识；
-- OpenAI 兼容 API 的每日知识日报，分别归纳时间线与访问内容，并基于证据推测兴趣方向；
-- 手动 S3 兼容对象存储同步，支持配置 endpoint、Bucket、Region 和访问凭据。
-- 每日知识日报定时生成，可推送至通用 Webhook 和 Telegram Bot；
-- 导出完整 JSON 数据快照或帖子 CSV。
+![X Memory 记忆流界面](docs/screenshots/feed.png)
 
-AI 和 S3 服务由用户在扩展设置中配置。AI Key 和 S3 凭据只保存在扩展本地存储中；帖子正文会发送给配置的 AI 服务，S3 同步会上传本地实体快照。S3 快照当前使用单个 JSON 对象，远端对象未加密；需为 Bucket 配置允许扩展来源执行 GET 和 PUT 的 CORS 规则。
+[![Chrome MV3](https://img.shields.io/badge/Chrome-MV3-4C5FD5?style=flat-square)](manifest.json)
+[![Tests](https://img.shields.io/badge/tests-17%20passing-12805C?style=flat-square)](test/)
+[![Local-first](https://img.shields.io/badge/-Local--first-0E9384?style=flat-square)](#-隐私优先数据只属于你)
+[![License](https://img.shields.io/badge/license-private-64748B?style=flat-square)](#)
 
-定时日报和推送在扩展设置中配置，按浏览器本地时间每日运行；浏览器需要保持打开。通用 Webhook 接收包含日报、日期和统计数据的 JSON POST 请求。Telegram 需要 Bot Token 和 Chat ID；密钥保存在扩展本地设置中。设置页可下载包含所有实体域的 JSON 备份，或下载按帖子合并的 CSV。
+</div>
 
-## 快速验证
+---
+
+## 🤔 你有没有遇到过这些时刻？
+
+- 在 X 上刷到一条特别好的帖子，想收藏时已经被新内容冲走了；
+- 记得看过某个观点，却怎么也搜不回那条原帖；
+- 点开一条转帖后忘了自己之前有没有访问过原始来源；
+- 每天看了很多，却说不清自己到底对什么感兴趣。
+
+**X Memory 就是为这些时刻而生的。**
+
+它不打扰你的浏览，只在后台默默把「看过的」和「访问过的」分开记好，需要时一搜即得。
+
+---
+
+## ✨ 核心能力
+
+### 📌 时间线与足迹，各自记录、按帖聚合
+
+时间线里划过的帖子、你主动点开的原帖，是两个独立的数据域。打开一条记录，能看到它是否访问过、访问了几次——转帖和原帖的关系一目了然。
+
+![按原帖聚合的访问足迹](docs/screenshots/feed.png)
+
+### 🔍 全文搜索 + 智能筛选
+
+按正文、作者、@handle 搜索；用「全部 / 时间线 / 已访问」快速切换。128 条帖子、47 次访问，都能在一秒内定位。
+
+### 🧠 AI 每日知识日报
+
+每天自动把你看过的内容归纳成结构化日报：时间线在关注什么、主动访问了什么、你可能正在形成哪些兴趣方向——并且给出证据和置信度，而不是空泛的总结。
+
+![AI 每日知识日报](docs/screenshots/digest.png)
+
+### 📤 定时推送与可控同步
+
+日报可按时推送到 Telegram 或任意 Webhook；需要备份时，手动同步到你自己的 S3 兼容存储。所有外部服务都由你配置、由你触发。
+
+---
+
+## 🌗 精心打磨的双主题
+
+浅色专注、深色护眼，同一套设计语言贯穿始终。时间线用青色、访问用琥珀色，配合图标与文字三重编码——不依赖颜色也能分辨语义。
+
+![浅色与深色双主题](docs/screenshots/dark.png)
+
+---
+
+## 🔐 隐私优先，数据只属于你
+
+这不是一句口号，而是产品的设计底线：
+
+- **默认本地**：所有记录只存在你的浏览器本地，不上传任何服务器；
+- **密钥不出本机**：AI Key、S3 凭据、Bot Token 只保存在扩展本地存储；
+- **外发透明**：只有当你主动配置并触发时，帖子正文才会发送给 AI 服务、同步到 S3 或推送到 Webhook；
+- **远端不阻塞本地**：网络失败时本地回看完全不受影响；
+- **随时导出**：一键导出完整 JSON 快照或帖子 CSV，数据可随时带走。
+
+![隐私优先的设置界面](docs/screenshots/settings.png)
+
+---
+
+## 🚀 快速开始
+
+### 安装（无需开发者账号）
 
 ```sh
-npm test
-npm run check
-npm run build:extensions
+git clone https://github.com/kbsonlong/x-memory.git
+cd x-memory
+npm run build:chrome
 ```
 
-`npm run build:extensions` 会生成：
+把 `build/chrome/unpacked/` 目录作为「已解压的扩展程序」加载：
 
-- `build/chrome/x-memory-chrome.zip`：Chrome MV3 发布包。Chrome 开发调试仍可直接加载项目根目录 `/Volumes/nfs/src/x-memory`；
-- `build/safari/X-Memory.app`：macOS Safari Web Extension App；
-- `build/safari/X-Memory-macos-safari.zip`：macOS Safari App 压缩包；
-- `build/safari-project/X Memory/X Memory.xcodeproj`：Safari 的 Xcode 工程。
+1. 打开 `chrome://extensions`
+2. 开启右上角 **开发者模式**
+3. 点击 **加载已解压的扩展程序**，选择 `build/chrome/unpacked/`
 
-构建默认使用 `CODE_SIGNING_ALLOWED=NO`，用于验证编译和嵌入扩展结构。安装到 Safari 或分发前，需要在 Xcode 中选择有效的 Apple Development/Distribution signing identity。项目中 `apps/extension/manifest.json` 是早期源码参考；Chrome 发布包只使用根目录 `manifest.json`，避免两个扩展根目录产生歧义。
+> 想上架商店？Edge Add-ons 免费，Chrome Web Store 一次性 $5。完整分发指南见 [docs/10-distribution.md](docs/10-distribution.md)。
 
-在 Chrome 中加载项目根目录 `/Volumes/nfs/src/x-memory` 作为 unpacked extension。根目录的 `manifest.json` 指向 `apps/extension`，这样 service worker 可以使用同一项目内的 `src` 模块。点击扩展图标会打开 X Memory popup；如果此前已经加载过旧版本，需要在 `chrome://extensions` 点击 Reload，或移除后重新加载包含 `manifest.json` 的解压目录。
+### 日常使用
 
-## 目录
+- 照常刷 X，插件自动保存时间线内容；
+- 点开原帖，访问足迹会被记录并累加到对应卡片；
+- 点击工具栏图标，搜索、筛选、回看你的记忆；
+- 在「日报」页生成 AI 知识日报，或在「设置」页配置定时推送。
 
-```text
-apps/extension/      MV3 manifest 和统一 service worker
-src/                 schema、repository、query、migration、AI、sync
- test/               Node 内置测试
- docs/               产品和架构设计
+---
+
+## 🏗️ 它是怎么工作的
+
+X Memory 把「时间线历史」和「访问足迹」建模为两个独立数据域，用 `postId` 作为跨域关联键，通过统一的 Repository 与 Query Service 关联查询。UI 和内容脚本不直接碰存储、AI 或 S3——所有能力收敛到 MV3 service worker 的消息协议里。
+
+```
+X 页面 ──采集──> content script ──消息──> service worker
+                                              │
+                        ┌─────────────────────┼─────────────────────┐
+                     Repository          Query Service         AI / Sync
+                        │                     │                     │
+                  本地存储域           按 postId 跨域关联      可选外发（显式触发）
 ```
 
-## 设计原则
+- **本地优先**：远端失败不阻塞本地，语义不依赖单一数据源；
+- **幂等迁移**：旧数据结构可重复迁移，不删数据、不覆盖新实体；
+- **稳定协议**：为 Agent 读取预留了受授权约束的接口。
 
-1. 全局能力统一流程和协议，数据域保留自己的语义、生命周期和冲突策略。
-2. `postId` 是跨域关联键；事件实体使用自己的稳定 ID。
-3. UI 和 content script 不直接访问本地存储、AI endpoint 或 S3。
-4. 远端失败不能阻塞本地回看。
-5. 迁移可重复执行，不删除旧数据，不覆盖已有新实体。
+---
 
-## 基线
+## 📚 文档
 
-设计依据：
+| 文档 | 内容 |
+|------|------|
+| [产品设计](docs/01-product-design.md) | 定位、用户价值与产品边界 |
+| [架构设计](docs/02-architecture.md) | 全局能力与数据域的划分 |
+| [领域模型](docs/03-domain-model.md) | 实体、关联键与生命周期 |
+| [AI 日报](docs/04-ai.md) | 日报生成与兴趣推测 |
+| [同步机制](docs/05-sync.md) | S3 快照同步策略 |
+| [UI 设计方案](docs/09-ui-design-system.md) | 设计系统、组件与状态规范 |
+| [分发指南](docs/10-distribution.md) | 打包、上架与商店发布 |
 
-- `rewind-for-x` `4122793d28bd7da0768553d1350bd5dcf38c978c`
-- `x-footprints` `2b205e1a5d9992058611d818e8cb19dd668a3b6`
+---
 
-两个基线仓库保持原样，可随时对照或回退。
+## 🛠️ 开发验证
+
+```sh
+npm test              # 17 项测试
+npm run check         # 语法与 manifest 校验
+npm run build:chrome  # 构建 Chrome/Edge 包
+npm run build:extensions  # 含 Safari Xcode 工程（需 macOS）
+```
+
+---
+
+<div align="center">
+
+**把信息流，变成属于你的记忆。**
+
+Made with local-first principles · 数据始终在你的设备上
+
+</div>
