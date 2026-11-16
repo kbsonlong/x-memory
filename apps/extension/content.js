@@ -1,10 +1,73 @@
 (() => {
-  if (globalThis.__xMemoryCaptureActive) return;
-  globalThis.__xMemoryCaptureActive = true;
+  let runtime;
+  let extensionId;
+  try {
+    runtime = globalThis.chrome?.runtime;
+    extensionId = runtime?.id;
+  } catch {
+    return;
+  }
+  if (!extensionId) return;
+
+  const previousController = globalThis.__xMemoryCaptureController;
+  if (previousController) {
+    let previousContextAlive = false;
+    try {
+      previousContextAlive = previousController.isAlive?.() === true;
+    } catch {}
+    if (previousController.extensionId === extensionId && previousContextAlive) return;
+    try { previousController.stop?.(); } catch {}
+  }
+
   const captured = new Map();
   const pending = new Map();
   let captureTimer = null;
+  let routeTimer = null;
+  let mutationObserver = null;
+  let visibility = null;
   const watched = new Set();
+  const controller = { extensionId, runtime, isAlive: null, stop: null };
+  globalThis.__xMemoryCaptureController = controller;
+
+  function contextIsAlive() {
+    try {
+      return Boolean(runtime?.id && typeof runtime.sendMessage === 'function' && runtime.getManifest());
+    } catch {
+      return false;
+    }
+  }
+
+  function stopCapture() {
+    try { visibility?.disconnect(); } catch {}
+    try { mutationObserver?.disconnect(); } catch {}
+    if (captureTimer) clearTimeout(captureTimer);
+    if (routeTimer) clearInterval(routeTimer);
+    captureTimer = null;
+    routeTimer = null;
+    watched.clear();
+    if (globalThis.__xMemoryCaptureController === controller) {
+      delete globalThis.__xMemoryCaptureController;
+    }
+  }
+
+  controller.isAlive = () => contextIsAlive();
+  controller.stop = stopCapture;
+
+  function sendRuntimeMessage(message) {
+    try {
+      if (!contextIsAlive()) {
+        stopCapture();
+        return Promise.reject(new Error('Extension context is unavailable'));
+      }
+      return Promise.resolve(runtime.sendMessage(message)).catch((error) => {
+        if (!contextIsAlive() || /extension context invalidated/i.test(error?.message || '')) stopCapture();
+        throw error;
+      });
+    } catch (error) {
+      if (!contextIsAlive() || /extension context invalidated/i.test(error?.message || '')) stopCapture();
+      return Promise.reject(error);
+    }
+  }
 
   function statusIdFromUrl(url = location.href) {
     const match = String(url).match(/\/status\/(\d+)/);
@@ -68,6 +131,10 @@
   }
 
   function captureArticle(article) {
+    if (!contextIsAlive()) {
+      stopCapture();
+      return;
+    }
     if (location.pathname !== '/home') return;
       const time = [...article.querySelectorAll('a[href*="/status/"] time')].find((node) => {
         const quote = node.closest('div[role="link"]');
@@ -83,7 +150,7 @@
         return pending.get(postId).then(() => article.isConnected ? captureArticle(article) : undefined);
       }
       if (captured.get(postId) === fingerprint) return;
-      const request = chrome.runtime.sendMessage({
+      const request = sendRuntimeMessage({
         type: 'rewind.capture',
         post,
         observationId: `page:${Date.now()}:${postId}`
@@ -95,7 +162,7 @@
       return request;
   }
 
-  const visibility = new IntersectionObserver((entries) => {
+  visibility = new IntersectionObserver((entries) => {
     for (const entry of entries) {
       if (!entry.isIntersecting) continue;
       captureArticle(entry.target)?.catch(() => {});
@@ -106,6 +173,10 @@
   }, { threshold: [0, 0.25, 0.5, 0.75, 1] });
 
   function captureVisibleTimeline() {
+    if (!contextIsAlive()) {
+      stopCapture();
+      return;
+    }
     for (const article of watched) {
       if (!article.isConnected) {
         visibility.unobserve(article);
@@ -124,12 +195,16 @@
   }
 
   function captureDetail() {
+    if (!contextIsAlive()) {
+      stopCapture();
+      return;
+    }
     const postId = statusIdFromUrl();
     if (!postId) return;
     const article = document.querySelector('article[data-testid="tweet"]');
     const link = absoluteUrl(location.href);
     const post = article ? postFrom(article, postId, link) : { id: postId, url: link };
-    chrome.runtime.sendMessage({
+    sendRuntimeMessage({
       type: 'footprints.upsert',
       visit: { id: `${location.hostname}:${postId}:${Date.now()}`, postId, ...post, visitedAt: new Date().toISOString() }
     }).catch(() => {});
@@ -137,6 +212,10 @@
 
   let scanQueued = false;
   function scheduleCapture() {
+    if (!contextIsAlive()) {
+      stopCapture();
+      return;
+    }
     if (!scanQueued) {
       scanQueued = true;
       requestAnimationFrame(() => {
@@ -153,26 +232,39 @@
 
   captureVisibleTimeline();
   captureDetail();
-  new MutationObserver(scheduleCapture).observe(document.documentElement, { childList: true, subtree: true });
+  mutationObserver = new MutationObserver(scheduleCapture);
+  mutationObserver.observe(document.documentElement, { childList: true, subtree: true });
   let lastPath = location.pathname;
-  setInterval(() => {
+  routeTimer = setInterval(() => {
+    if (!contextIsAlive()) {
+      stopCapture();
+      return;
+    }
     if (location.pathname !== lastPath) {
       lastPath = location.pathname;
       scheduleCapture();
     }
   }, 500);
-  chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-    if (message?.type !== 'memory.capture.current') return;
-    if (location.pathname !== '/home') {
-      sendResponse({ ok: false, error: '请先打开 X 首页' });
-      return;
-    }
-    const articles = [...document.querySelectorAll('article[data-testid="tweet"]')];
-    const requests = articles.filter((article) => {
-      const rect = article.getBoundingClientRect();
-      return rect.bottom > 0 && rect.top < innerHeight;
-    }).map(captureArticle).filter(Boolean);
-    Promise.all(requests).then(() => sendResponse({ ok: true })).catch((error) => sendResponse({ ok: false, error: error.message }));
-    return true;
-  });
+  try {
+    runtime.onMessage.addListener((message, sender, sendResponse) => {
+      if (!contextIsAlive()) {
+        stopCapture();
+        return;
+      }
+      if (message?.type !== 'memory.capture.current') return;
+      if (location.pathname !== '/home') {
+        sendResponse({ ok: false, error: '请先打开 X 首页' });
+        return;
+      }
+      const articles = [...document.querySelectorAll('article[data-testid="tweet"]')];
+      const requests = articles.filter((article) => {
+        const rect = article.getBoundingClientRect();
+        return rect.bottom > 0 && rect.top < innerHeight;
+      }).map(captureArticle).filter(Boolean);
+      Promise.all(requests).then(() => sendResponse({ ok: true })).catch((error) => sendResponse({ ok: false, error: error.message }));
+      return true;
+    });
+  } catch {
+    stopCapture();
+  }
 })();
