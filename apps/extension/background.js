@@ -8,6 +8,7 @@ const repository = new Repository(new ChromeStorageStore());
 const query = new QueryService(repository);
 const ai = createAiOrchestrator({ query, provider: createOpenAiCompatibleProvider() });
 const SETTINGS_KEY = 'xmemory.settings';
+const DAILY_DIGEST_ALARM = 'xmemory.daily-digest';
 
 export async function handleMessage(message, sender = {}) {
   try {
@@ -30,11 +31,20 @@ export async function handleMessage(message, sender = {}) {
             ...input.s3,
             secretAccessKey: keepSecret(input.s3?.secretAccessKey, previous.s3.secretAccessKey),
             sessionToken: keepSecret(input.s3?.sessionToken, previous.s3.sessionToken)
+          },
+          webhook: {
+            ...input.webhook,
+            telegramBotToken: keepSecret(input.webhook?.telegramBotToken, previous.webhook.telegramBotToken)
           }
         });
         await chrome.storage.local.set({ [SETTINGS_KEY]: settings });
+        await configureDailyDigestAlarm(settings);
         return { ok: true, data: publicSettings(settings) };
       }
+      case 'memory.export.snapshot':
+        return { ok: true, data: await repository.snapshot() };
+      case 'memory.export.feed':
+        return { ok: true, data: await query.getFeed() };
       case 'memory.sync.run': {
         const settings = await getSettings();
         const transport = new S3SnapshotTransport(settings.s3);
@@ -107,12 +117,91 @@ function normalizeSettings(value = {}) {
       secretAccessKey: String(s3.secretAccessKey || '').trim(),
       sessionToken: String(s3.sessionToken || '').trim(),
       prefix: String(s3.prefix || 'x-memory').trim()
+    },
+    schedule: {
+      dailyDigestEnabled: Boolean(value.schedule?.dailyDigestEnabled),
+      dailyDigestTime: validDigestTime(value.schedule?.dailyDigestTime)
+    },
+    webhook: {
+      url: String(value.webhook?.url || '').trim(),
+      telegramBotToken: String(value.webhook?.telegramBotToken || '').trim(),
+      telegramChatId: String(value.webhook?.telegramChatId || '').trim()
     }
   };
 }
 
 function publicSettings(settings) {
-  return { ...settings, aiApiKey: settings.aiApiKey ? '••••••••' : '', s3: { ...settings.s3, secretAccessKey: settings.s3.secretAccessKey ? '••••••••' : '', sessionToken: settings.s3.sessionToken ? '••••••••' : '' } };
+  return {
+    ...settings,
+    aiApiKey: settings.aiApiKey ? '••••••••' : '',
+    s3: { ...settings.s3, secretAccessKey: settings.s3.secretAccessKey ? '••••••••' : '', sessionToken: settings.s3.sessionToken ? '••••••••' : '' },
+    webhook: { ...settings.webhook, telegramBotToken: settings.webhook.telegramBotToken ? '••••••••' : '' }
+  };
+}
+
+function validDigestTime(value) {
+  const time = String(value || '09:00').trim();
+  return /^([01]\d|2[0-3]):[0-5]\d$/.test(time) ? time : '09:00';
+}
+
+async function configureDailyDigestAlarm(settings) {
+  if (!globalThis.chrome?.alarms) return;
+  settings ||= await getSettings();
+  await chrome.alarms.clear(DAILY_DIGEST_ALARM);
+  if (!settings.schedule.dailyDigestEnabled) return;
+  chrome.alarms.create(DAILY_DIGEST_ALARM, { when: nextDigestTime(settings.schedule.dailyDigestTime) });
+}
+
+function nextDigestTime(time) {
+  const [hours, minutes] = time.split(':').map(Number);
+  const next = new Date();
+  next.setHours(hours, minutes, 0, 0);
+  if (next.getTime() <= Date.now()) next.setDate(next.getDate() + 1);
+  return next.getTime();
+}
+
+async function runScheduledDigest() {
+  const settings = await getSettings();
+  if (!settings.schedule.dailyDigestEnabled) return;
+  const date = localDateOf(new Date());
+  const stateResult = await chrome.storage.local.get('xmemory.scheduler.lastRunDate');
+  if (stateResult['xmemory.scheduler.lastRunDate'] === date) return;
+  const artifact = await generateDailyDigest(date);
+  await pushDailyDigest(settings.webhook, artifact);
+  await chrome.storage.local.set({ 'xmemory.scheduler.lastRunDate': date });
+}
+
+async function pushDailyDigest(webhook, artifact) {
+  const payload = artifact?.payload || {};
+  const report = payload.report || { overall: payload.text || '' };
+  const date = payload.date || localDateOf(new Date());
+  const text = [
+    `X Memory · ${date} 知识日报`,
+    report.overall || '今日知识日报已生成。',
+    ...(Array.isArray(report.interestDirections) ? report.interestDirections.map((item) => `兴趣方向：${item.direction || item.category || ''} — ${item.summary || item.evidence || ''}`) : [])
+  ].join('\n').slice(0, 3900);
+  const results = [];
+  if (webhook.url) {
+    const response = await fetch(webhook.url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ event: 'daily_digest', date, title: `X Memory · ${date} 知识日报`, text, report, stats: payload.stats || {} })
+    });
+    if (!response.ok) throw new Error(`Webhook 推送失败（HTTP ${response.status}）`);
+    results.push('webhook');
+  }
+  if (webhook.telegramBotToken && webhook.telegramChatId) {
+    const response = await fetch(`https://api.telegram.org/bot${webhook.telegramBotToken}/sendMessage`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ chat_id: webhook.telegramChatId, text, disable_web_page_preview: true })
+    });
+    if (!response.ok) throw new Error(`Telegram 推送失败（HTTP ${response.status}）`);
+    const result = await response.json();
+    if (!result.ok) throw new Error(`Telegram 推送失败：${result.description || '未知错误'}`);
+    results.push('telegram');
+  }
+  return results;
 }
 
 async function generateDailyDigest(rawDate) {
@@ -207,9 +296,17 @@ if (globalThis.chrome?.runtime?.onMessage) {
   });
 
   chrome.runtime.onInstalled.addListener(async () => {
+    await configureDailyDigestAlarm();
     const tabs = await chrome.tabs.query({ url: ['https://x.com/*', 'https://twitter.com/*'] });
     await Promise.allSettled(tabs.filter((tab) => tab.id).map((tab) =>
       chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ['apps/extension/content.js'] })
     ));
+  });
+
+  chrome.runtime.onStartup?.addListener(() => configureDailyDigestAlarm());
+  chrome.alarms?.onAlarm.addListener((alarm) => {
+    if (alarm.name !== DAILY_DIGEST_ALARM) return;
+    runScheduledDigest().catch((error) => console.error('Scheduled daily digest failed:', error));
+    configureDailyDigestAlarm().catch((error) => console.error('Daily digest alarm setup failed:', error));
   });
 }

@@ -16,7 +16,7 @@
         </div>
       </div>
       <div class="header-actions">
-        <button id="settings-toggle" class="icon-button" type="button" title="设置" aria-label="设置">⚙</button>
+        <button id="settings-toggle" class="icon-button" type="button" title="打开设置" aria-label="打开设置">⚙</button>
         <button id="refresh" class="icon-button" type="button" title="刷新列表" aria-label="刷新列表">↻</button>
       </div>
     </header>
@@ -32,7 +32,13 @@
 
       <section id="summary" class="summary" hidden aria-label="记录统计"></section>
 
-      <section class="daily-panel" aria-label="每日知识日报">
+      <nav class="view-tabs" role="tablist" aria-label="主导航">
+        <button class="view-tab active" id="tab-feed" type="button" role="tab" aria-selected="true" aria-controls="feed-view" data-view="feed">帖子</button>
+        <button class="view-tab" id="tab-digest" type="button" role="tab" aria-selected="false" aria-controls="digest-view" data-view="digest">每日日报</button>
+        <button class="view-tab" id="tab-settings" type="button" role="tab" aria-selected="false" aria-controls="settings-panel" data-view="settings">设置</button>
+      </nav>
+
+      <section id="digest-view" class="view daily-panel" role="tabpanel" aria-labelledby="tab-digest" hidden aria-label="每日知识日报">
         <div class="daily-heading">
           <div><strong>每日知识日报</strong><span>归纳时间线、访问内容与兴趣方向</span></div>
           <input id="digest-date" type="date" aria-label="日报日期">
@@ -41,7 +47,7 @@
         <div id="daily-report" class="daily-report" hidden aria-live="polite"></div>
       </section>
 
-      <section id="settings-panel" class="settings-panel" hidden>
+      <section id="settings-panel" class="view settings-panel" role="tabpanel" aria-labelledby="tab-settings" hidden>
         <div class="settings-heading"><strong>AI 总结</strong><span>API Key 仅保存在本机</span></div>
         <label>API 地址<input id="ai-endpoint" type="url" placeholder="https://api.openai.com/v1/chat/completions"></label>
         <div class="settings-row">
@@ -60,6 +66,17 @@
           <label>Session Token（可选）<input id="s3-session-token" type="password" autocomplete="off"></label>
           <label>对象前缀<input id="s3-prefix" type="text" placeholder="x-memory"></label>
         </div>
+        <div class="settings-heading"><strong>定时日报</strong><span>浏览器运行时按本地时间执行</span></div>
+        <div class="settings-row schedule-row">
+          <label class="check-label"><input id="digest-schedule-enabled" type="checkbox"> 每日生成并推送日报</label>
+          <label>执行时间<input id="digest-schedule-time" type="time" value="09:00"></label>
+        </div>
+        <div class="settings-heading"><strong>Webhook 推送</strong><span>可同时配置两种渠道</span></div>
+        <label>Webhook URL<input id="webhook-url" type="url" placeholder="https://example.com/webhook"></label>
+        <div class="settings-row">
+          <label>Telegram Bot Token<input id="telegram-token" type="password" autocomplete="off" placeholder="留空则保留已保存的 Token"></label>
+          <label>Telegram Chat ID<input id="telegram-chat-id" type="text" autocomplete="off" placeholder="例如：123456789"></label>
+        </div>
         <p class="privacy-note">同步会把记录上传到所填的 S3 存储桶；对象内容未加密。生成日报会把所选日期的时间线和访问帖子正文发送到配置的 AI 服务。</p>
         <div class="settings-actions">
           <button id="save-settings" type="button">保存设置</button>
@@ -67,19 +84,32 @@
         </div>
       </section>
 
-      <div class="toolbar">
-        <label class="search-box">
-          <span aria-hidden="true">⌕</span>
-          <input id="search" type="search" placeholder="搜索正文、作者或标签" autocomplete="off">
-        </label>
-        <div class="filters" role="tablist" aria-label="记录筛选">
-          <button class="filter active" data-filter="all" role="tab" aria-selected="true" type="button">全部</button>
-          <button class="filter" data-filter="timeline" role="tab" aria-selected="false" type="button">时间线</button>
-          <button class="filter" data-filter="visited" role="tab" aria-selected="false" type="button">已访问</button>
+      <section id="feed-view" class="view feed-view" role="tabpanel" aria-labelledby="tab-feed">
+        <div class="toolbar">
+          <label class="search-box">
+            <span aria-hidden="true">⌕</span>
+            <input id="search" type="search" placeholder="搜索正文、作者或标签" autocomplete="off">
+          </label>
+          <div class="filters" role="tablist" aria-label="记录筛选">
+            <button class="filter active" data-filter="all" role="tab" aria-selected="true" type="button">全部</button>
+            <button class="filter" data-filter="timeline" role="tab" aria-selected="false" type="button">时间线</button>
+            <button class="filter" data-filter="visited" role="tab" aria-selected="false" type="button">已访问</button>
+          </div>
         </div>
-      </div>
 
-      <section id="records" class="records" aria-live="polite"></section>
+        <section class="export-actions" aria-label="导出数据">
+          <span>导出本地数据</span>
+          <button id="export-json" type="button">完整 JSON 备份</button>
+          <button id="export-csv" type="button">帖子 CSV</button>
+        </section>
+
+        <section id="records" class="records" aria-live="polite"></section>
+        <nav id="pagination" class="pagination" aria-label="帖子列表分页" hidden>
+          <button id="page-previous" type="button">上一页</button>
+          <span id="page-indicator" aria-live="polite"></span>
+          <button id="page-next" type="button">下一页</button>
+        </nav>
+      </section>
     </main>
 
     <template id="record-template">

@@ -4,10 +4,12 @@ const records = document.querySelector('#records');
 const template = document.querySelector('#record-template');
 const searchInput = document.querySelector('#search');
 const filters = [...document.querySelectorAll('.filter')];
-const settingsPanel = document.querySelector('#settings-panel');
 const digestDate = document.querySelector('#digest-date');
 const dailyReport = document.querySelector('#daily-report');
+const viewTabs = [...document.querySelectorAll('.view-tab')];
+const pageSize = 20;
 let activeFilter = 'all';
+let activePage = 1;
 let allItems = [];
 
 digestDate.value = localDateString(new Date());
@@ -20,20 +22,43 @@ for (const button of filters) {
       item.classList.toggle('active', active);
       item.setAttribute('aria-selected', String(active));
     }
+    activePage = 1;
     renderItems();
   });
 }
 
 document.querySelector('#refresh').addEventListener('click', refreshRecords);
-document.querySelector('#settings-toggle').addEventListener('click', () => {
-  settingsPanel.hidden = !settingsPanel.hidden;
-  if (!settingsPanel.hidden) loadSettings();
-});
+document.querySelector('#settings-toggle').addEventListener('click', () => setView('settings'));
+for (const tab of viewTabs) tab.addEventListener('click', () => setView(tab.dataset.view));
+document.querySelector('#page-previous').addEventListener('click', () => changePage(-1));
+document.querySelector('#page-next').addEventListener('click', () => changePage(1));
 document.querySelector('#save-settings').addEventListener('click', saveSettings);
 document.querySelector('#sync-now').addEventListener('click', syncNow);
 document.querySelector('#generate-digest').addEventListener('click', generateDailyDigest);
+document.querySelector('#export-json').addEventListener('click', () => exportData('json'));
+document.querySelector('#export-csv').addEventListener('click', () => exportData('csv'));
 digestDate.addEventListener('change', loadDailyDigest);
-searchInput.addEventListener('input', renderItems);
+searchInput.addEventListener('input', () => {
+  activePage = 1;
+  renderItems();
+});
+
+function setView(view) {
+  for (const tab of viewTabs) {
+    const selected = tab.dataset.view === view;
+    tab.classList.toggle('active', selected);
+    tab.setAttribute('aria-selected', String(selected));
+    document.querySelector(`#${tab.getAttribute('aria-controls')}`).hidden = !selected;
+  }
+  if (view === 'settings') loadSettings();
+  if (view === 'digest') loadDailyDigest();
+}
+
+function changePage(delta) {
+  const totalPages = Math.max(1, Math.ceil(visibleItems().length / pageSize));
+  activePage = Math.min(totalPages, Math.max(1, activePage + delta));
+  renderItems();
+}
 
 function send(message) {
   return new Promise((resolve, reject) => {
@@ -303,14 +328,22 @@ async function generateDailyDigest() {
 function renderItems() {
   records.replaceChildren();
   const items = visibleItems();
+  const totalPages = Math.max(1, Math.ceil(items.length / pageSize));
+  activePage = Math.min(activePage, totalPages);
   if (!items.length) {
     const empty = document.createElement('div');
     empty.className = 'empty-state';
     empty.innerHTML = '<div class="empty-icon">⌁</div><strong>没有匹配的内容</strong><span>打开 X 页面后，插件会自动保存可见帖子。</span>';
     records.append(empty);
+    document.querySelector('#pagination').hidden = true;
     return;
   }
-  for (const item of items) addRecord(item);
+  for (const item of items.slice((activePage - 1) * pageSize, activePage * pageSize)) addRecord(item);
+  const pagination = document.querySelector('#pagination');
+  pagination.hidden = items.length <= pageSize;
+  document.querySelector('#page-indicator').textContent = `第 ${activePage} / ${totalPages} 页 · 共 ${items.length} 条（每页 ${pageSize} 条）`;
+  document.querySelector('#page-previous').disabled = activePage === 1;
+  document.querySelector('#page-next').disabled = activePage === totalPages;
 }
 
 async function loadRecords() {
@@ -330,6 +363,7 @@ async function loadRecords() {
   } catch (error) {
     allItems = [];
     summary.hidden = true;
+    renderItems();
     status.textContent = `读取失败：${error.message}`;
     document.querySelector('.hero').classList.add('error');
   }
@@ -351,6 +385,11 @@ async function loadSettings() {
     document.querySelector('#s3-secret-key').placeholder = value.s3.secretAccessKey ? '已配置；留空保持不变' : 'Secret Access Key';
     document.querySelector('#s3-session-token').placeholder = value.s3.sessionToken ? '已配置；留空保持不变' : 'Session Token';
     document.querySelector('#s3-prefix').value = value.s3.prefix || 'x-memory';
+    document.querySelector('#digest-schedule-enabled').checked = value.schedule.dailyDigestEnabled;
+    document.querySelector('#digest-schedule-time').value = value.schedule.dailyDigestTime || '09:00';
+    document.querySelector('#webhook-url').value = value.webhook.url || '';
+    document.querySelector('#telegram-token').placeholder = value.webhook.telegramBotToken ? '已配置；留空保持不变' : '粘贴 Bot Token';
+    document.querySelector('#telegram-chat-id').value = value.webhook.telegramChatId || '';
   } catch (error) {
     status.textContent = `读取设置失败：${error.message}`;
   }
@@ -370,10 +409,23 @@ async function saveSettings() {
   try {
     const aiEndpoint = document.querySelector('#ai-endpoint').value.trim() || 'https://api.openai.com/v1/chat/completions';
     const s3Endpoint = document.querySelector('#s3-endpoint').value.trim();
-    const origins = [...new Set([endpointOrigin(aiEndpoint), endpointOrigin(s3Endpoint)].filter(Boolean))];
+    const webhookUrl = document.querySelector('#webhook-url').value.trim();
+    const telegramBotToken = document.querySelector('#telegram-token').value.trim();
+    const telegramChatId = document.querySelector('#telegram-chat-id').value.trim();
+    const telegramTokenConfigured = Boolean(telegramBotToken) || document.querySelector('#telegram-token').placeholder.startsWith('已配置');
+    if (telegramChatId && !telegramTokenConfigured) {
+      throw new Error('Telegram Bot Token 未填写；如需修改 Chat ID，请重新填写 Token');
+    }
+    if (telegramBotToken && !telegramChatId) {
+      throw new Error('请同时填写 Telegram Bot Token 和 Chat ID');
+    }
+    const origins = [...new Set([
+      endpointOrigin(aiEndpoint), endpointOrigin(s3Endpoint), endpointOrigin(webhookUrl),
+      telegramTokenConfigured && telegramChatId ? 'https://api.telegram.org/*' : ''
+    ].filter(Boolean))];
     if (origins.length && chrome.permissions?.request) {
       const granted = await chrome.permissions.request({ origins });
-      if (!granted) throw new Error('需要允许访问配置的 AI 或 S3 服务地址');
+      if (!granted) throw new Error('需要允许访问配置的 AI、S3 或推送服务地址');
     }
     const response = await send({
       type: 'memory.settings.save',
@@ -389,6 +441,15 @@ async function saveSettings() {
           secretAccessKey: document.querySelector('#s3-secret-key').value.trim(),
           sessionToken: document.querySelector('#s3-session-token').value.trim(),
           prefix: document.querySelector('#s3-prefix').value.trim() || 'x-memory'
+        },
+        schedule: {
+          dailyDigestEnabled: document.querySelector('#digest-schedule-enabled').checked,
+          dailyDigestTime: document.querySelector('#digest-schedule-time').value || '09:00'
+        },
+        webhook: {
+          url: webhookUrl,
+          telegramBotToken,
+          telegramChatId
         }
       }
     });
@@ -396,6 +457,7 @@ async function saveSettings() {
     document.querySelector('#ai-key').value = '';
     document.querySelector('#s3-secret-key').value = '';
     document.querySelector('#s3-session-token').value = '';
+    document.querySelector('#telegram-token').value = '';
     await loadSettings();
     status.textContent = '设置已保存在本机';
   } catch (error) {
@@ -403,6 +465,53 @@ async function saveSettings() {
   } finally {
     button.disabled = false;
   }
+}
+
+async function exportData(format) {
+  const button = document.querySelector(format === 'json' ? '#export-json' : '#export-csv');
+  button.disabled = true;
+  try {
+    const response = await send({ type: format === 'json' ? 'memory.export.snapshot' : 'memory.export.feed' });
+    if (!response?.ok) throw new Error(response?.error?.message || '导出失败');
+    const date = new Date().toISOString().replace(/[:.]/g, '-');
+    let content;
+    let type;
+    let extension;
+    if (format === 'json') {
+      content = JSON.stringify({ format: 'x-memory-snapshot', version: 1, exportedAt: new Date().toISOString(), data: response.data }, null, 2);
+      type = 'application/json';
+      extension = 'json';
+    } else {
+      const rows = response.data.map((item) => {
+        const entities = [item.post, ...item.observations, ...item.visits].filter(Boolean);
+        const payload = Object.assign({}, ...entities.reverse().map((entity) => entity.payload || {}));
+        return [item.id, payload.text || '', payload.authorName || '', payload.authorHandle || '', payload.url || '', entities.some((entity) => entity.type === 'visit_event') ? 'true' : 'false'];
+      });
+      content = [['post_id', 'text', 'author_name', 'author_handle', 'url', 'visited'], ...rows].map((row) => row.map(csvCell).join(',')).join('\r\n');
+      type = 'text/csv;charset=utf-8';
+      extension = 'csv';
+    }
+    downloadText(content, `x-memory-export-${date}.${extension}`, type);
+    status.textContent = `${format.toUpperCase()} 数据已导出`;
+  } catch (error) {
+    status.textContent = `导出失败：${error.message}`;
+  } finally {
+    button.disabled = false;
+  }
+}
+
+function csvCell(value) {
+  const text = String(value ?? '');
+  return `"${text.replace(/"/g, '""')}"`;
+}
+
+function downloadText(content, filename, type) {
+  const url = URL.createObjectURL(new Blob([content], { type }));
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  link.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
 async function syncNow() {
