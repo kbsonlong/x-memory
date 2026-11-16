@@ -1,4 +1,5 @@
 (() => {
+  const MAX_CAPTURED_TEXT_LENGTH = 12000;
   let runtime;
   let extensionId;
   try {
@@ -95,14 +96,14 @@
       ) || readView?.querySelector('h1');
       const title = cleanText(titleNode?.innerText || titleNode?.textContent || '');
       const text = title && body && !body.startsWith(title) ? `${title}\n\n${body}` : body || title;
-      if (text) return text.slice(0, 100000);
+      if (text) return text.slice(0, MAX_CAPTURED_TEXT_LENGTH);
     }
 
     const text = [...article.querySelectorAll('[data-testid="tweetText"]')]
       .map((node) => cleanText(node.innerText || node.textContent || ''))
       .filter(Boolean)
       .join('\n\n');
-    return text.slice(0, 100000);
+    return text.slice(0, MAX_CAPTURED_TEXT_LENGTH);
   }
 
   function cleanText(value) {
