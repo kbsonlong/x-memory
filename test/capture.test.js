@@ -28,6 +28,8 @@ test('refresh waits for the visible post to be saved and skips ads', async () =>
     setInterval: () => 1,
     requestAnimationFrame: (fn) => fn(),
     chrome: { runtime: {
+      id: 'test-extension-id',
+      getManifest: () => ({}),
       onMessage: { addListener: (fn) => { listener = fn; } },
       sendMessage: (message) => { sent.push(message); return new Promise((resolve) => { finishSave = resolve; }); }
     } }
@@ -66,7 +68,7 @@ test('automatically captures posts added to the home timeline, including an oute
     IntersectionObserver: class { constructor(fn) { intersection = fn; } observe() {} unobserve() {} },
     MutationObserver: class { constructor(fn) { mutate = fn; } observe() {} },
     setTimeout: () => 1, setInterval: () => 1, requestAnimationFrame: (fn) => fn(),
-    chrome: { runtime: { onMessage: { addListener() {} }, sendMessage: async (message) => { sent.push(message); return { ok: true }; } } }
+    chrome: { runtime: { id: 'test-extension-id', getManifest: () => ({}), onMessage: { addListener() {} }, sendMessage: async (message) => { sent.push(message); return { ok: true }; } } }
   };
   vm.runInNewContext(source, context);
   articles.push(post);

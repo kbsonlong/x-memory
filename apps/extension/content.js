@@ -27,6 +27,7 @@
   let mutationObserver = null;
   let visibility = null;
   const watched = new Set();
+  const recordedDetailVisits = new Set();
   const controller = { extensionId, runtime, isAlive: null, stop: null };
   globalThis.__xMemoryCaptureController = controller;
 
@@ -46,6 +47,7 @@
     captureTimer = null;
     routeTimer = null;
     watched.clear();
+    recordedDetailVisits.clear();
     if (globalThis.__xMemoryCaptureController === controller) {
       delete globalThis.__xMemoryCaptureController;
     }
@@ -227,13 +229,21 @@
     }
     const postId = statusIdFromUrl();
     if (!postId) return;
+    // X is a SPA: MutationObserver and the route timer fire captureDetail many times
+    // for the same detail view. Record one visit per post per page lifecycle, but allow
+    // a new visit when the user navigates away and comes back via a different path cycle.
+    const visitKey = `${location.pathname}:${postId}`;
+    if (recordedDetailVisits.has(visitKey)) return;
+    recordedDetailVisits.add(visitKey);
     const article = document.querySelector('article[data-testid="tweet"]');
     const link = absoluteUrl(location.href);
-    const post = article ? postFrom(article, postId, link) : { id: postId, url: link };
+    const post = article ? postFrom(article, postId, link) : { url: link };
+    const visitId = `${location.hostname}:${postId}:${Date.now()}:${Math.random().toString(36).slice(2, 8)}`;
+    // Spread post first so its `id` (equal to postId) cannot overwrite the unique visit id.
     sendRuntimeMessage({
       type: 'footprints.upsert',
-      visit: { id: `${location.hostname}:${postId}:${Date.now()}`, postId, ...post, visitedAt: new Date().toISOString() }
-    }).catch(() => {});
+      visit: { ...post, postId, id: visitId, visitedAt: new Date().toISOString() }
+    }).catch(() => { recordedDetailVisits.delete(visitKey); });
   }
 
   let scanQueued = false;
@@ -268,6 +278,8 @@
     }
     if (location.pathname !== lastPath) {
       lastPath = location.pathname;
+      // Clear per-view dedup state on navigation so returning to a post counts as a new visit.
+      recordedDetailVisits.clear();
       scheduleCapture();
     }
   }, 500);
