@@ -84,12 +84,33 @@
   }
 
   function textFrom(article) {
+    const readView = article.querySelector('[data-testid="twitterArticleReadView"]');
+    const richText = article.querySelector(
+      '[data-testid="twitterArticleRichTextView"], .longform-unstyled, .x-article-body'
+    ) || readView;
+    if (richText) {
+      const body = cleanText(richText.innerText || richText.textContent || '');
+      const titleNode = article.querySelector(
+        '[data-testid="twitter-article-title"], [data-testid="twitterArticleTitle"]'
+      ) || readView?.querySelector('h1');
+      const title = cleanText(titleNode?.innerText || titleNode?.textContent || '');
+      const text = title && body && !body.startsWith(title) ? `${title}\n\n${body}` : body || title;
+      if (text) return text.slice(0, 100000);
+    }
+
     const text = [...article.querySelectorAll('[data-testid="tweetText"]')]
-      .map((node) => node.innerText || node.textContent || '')
-      .map((value) => value.trim())
+      .map((node) => cleanText(node.innerText || node.textContent || ''))
       .filter(Boolean)
       .join('\n\n');
-    return text.slice(0, 12000);
+    return text.slice(0, 100000);
+  }
+
+  function cleanText(value) {
+    return String(value)
+      .replace(/\u00a0/g, ' ')
+      .replace(/[ \t]+\n/g, '\n')
+      .replace(/\n{3,}/g, '\n\n')
+      .trim();
   }
 
   function authorFrom(article) {
