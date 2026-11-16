@@ -1,5 +1,5 @@
-const status = document.querySelector('#status');
-const summary = document.querySelector('#summary');
+const statusEl = document.querySelector('#status');
+const statusStrip = document.querySelector('#status-strip');
 const records = document.querySelector('#records');
 const template = document.querySelector('#record-template');
 const searchInput = document.querySelector('#search');
@@ -7,11 +7,68 @@ const filters = [...document.querySelectorAll('.filter')];
 const digestDate = document.querySelector('#digest-date');
 const dailyReport = document.querySelector('#daily-report');
 const viewTabs = [...document.querySelectorAll('.view-tab')];
+const toastHost = document.querySelector('#toast-host');
+const refreshButton = document.querySelector('#refresh');
 const pageSize = 20;
 let activeFilter = 'all';
 let activePage = 1;
 let allItems = [];
 
+/* ============================================================
+   UI feedback helpers
+   ============================================================ */
+function setStatus(text, isError) {
+  statusEl.textContent = text;
+  statusStrip.classList.toggle('is-error', Boolean(isError));
+}
+
+function toast(type, message) {
+  const node = document.createElement('div');
+  const iconId = type === 'error' ? 'i-alert' : (type === 'info' ? 'i-spark' : 'i-check');
+  node.className = `toast toast-${type}`;
+  node.innerHTML = `<span class="toast-ico"><svg class="ico"><use href="#${iconId}"></use></svg></span><span class="toast-message"></span>`;
+  node.querySelector('.toast-message').textContent = message;
+  toastHost.append(node);
+  requestAnimationFrame(() => node.classList.add('show'));
+  setTimeout(() => {
+    node.classList.remove('show');
+    setTimeout(() => node.remove(), 200);
+  }, 3500);
+}
+
+function setButtonLabel(button, text) {
+  const span = button.querySelector('span');
+  if (span) span.textContent = text;
+  else button.textContent = text;
+}
+
+/* ============================================================
+   Theme (persisted locally)
+   ============================================================ */
+function applyTheme(theme) {
+  document.documentElement.dataset.theme = theme;
+  const use = document.querySelector('#theme-toggle use');
+  if (use) use.setAttribute('href', theme === 'dark' ? '#i-sun' : '#i-moon');
+  document.querySelector('#theme-toggle').title = theme === 'dark' ? '切换到浅色主题' : '切换到深色主题';
+}
+function loadTheme() {
+  try {
+    chrome.storage.local.get('xmemory.theme', (result) => {
+      applyTheme(result['xmemory.theme'] === 'dark' ? 'dark' : 'light');
+    });
+  } catch {
+    applyTheme('light');
+  }
+}
+document.querySelector('#theme-toggle').addEventListener('click', () => {
+  const next = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark';
+  applyTheme(next);
+  try { chrome.storage.local.set({ 'xmemory.theme': next }); } catch { /* ignore */ }
+});
+
+/* ============================================================
+   Wiring (所有业务 id 均保留)
+   ============================================================ */
 digestDate.value = localDateString(new Date());
 
 for (const button of filters) {
@@ -36,12 +93,44 @@ document.querySelector('#save-settings').addEventListener('click', saveSettings)
 document.querySelector('#sync-now').addEventListener('click', syncNow);
 document.querySelector('#generate-digest').addEventListener('click', generateDailyDigest);
 document.querySelector('#test-digest-push').addEventListener('click', testDigestPush);
-document.querySelector('#export-json').addEventListener('click', () => exportData('json'));
-document.querySelector('#export-csv').addEventListener('click', () => exportData('csv'));
+for (const id of ['#export-json', '#export-json-alt']) {
+  document.querySelector(id).addEventListener('click', () => exportData('json', id));
+}
+for (const id of ['#export-csv', '#export-csv-alt']) {
+  document.querySelector(id).addEventListener('click', () => exportData('csv', id));
+}
 digestDate.addEventListener('change', loadDailyDigest);
 searchInput.addEventListener('input', () => {
   activePage = 1;
+  const hasValue = searchInput.value.length > 0;
+  document.querySelector('#clear-search').hidden = !hasValue;
   renderItems();
+});
+document.querySelector('#clear-search').addEventListener('click', () => {
+  searchInput.value = '';
+  document.querySelector('#clear-search').hidden = true;
+  activePage = 1;
+  renderItems();
+  searchInput.focus();
+});
+for (const button of document.querySelectorAll('.eye-button')) {
+  button.addEventListener('click', () => {
+    const input = document.querySelector(`#${button.dataset.eyeFor}`);
+    input.type = input.type === 'password' ? 'text' : 'password';
+  });
+}
+document.addEventListener('keydown', (event) => {
+  if (event.key === '/' && document.activeElement !== searchInput) {
+    event.preventDefault();
+    setView('feed');
+    searchInput.focus();
+  }
+  if (event.key === 'Escape' && document.activeElement === searchInput) {
+    searchInput.value = '';
+    document.querySelector('#clear-search').hidden = true;
+    renderItems();
+    searchInput.blur();
+  }
 });
 
 function setView(view) {
@@ -133,6 +222,13 @@ function itemTimestamp(item) {
     .sort((a, b) => String(b).localeCompare(String(a)))[0] || '';
 }
 
+function lastVisitTimestamp(item) {
+  return (item.visits || [])
+    .map(timestampOf)
+    .filter(Boolean)
+    .sort((a, b) => String(b).localeCompare(String(a)))[0] || '';
+}
+
 function mergedPayload(item) {
   const result = {};
   for (const entity of [...entitiesOf(item)].reverse()) {
@@ -193,10 +289,26 @@ function addRecord(item) {
   const handle = payload.authorHandle ? `@${String(payload.authorHandle).replace(/^@/, '')}` : '本地保存';
   const url = safeUrl(payload.url) || (postId.match(/^\d+$/) ? `https://x.com/i/status/${postId}` : '');
   const media = mediaFrom(payload);
+  const isVisit = !(item.post || item.observations.length);
 
-  node.querySelector('.record-type').textContent = item.post || item.observations.length ? '时间线记录' : '访问记录';
-  node.querySelector('.visited-badge').hidden = !item.visits.length;
+  // 三重编码：图标 + 文字 + 颜色
+  const typeTag = node.querySelector('.type-tag');
+  const typeUse = typeTag.querySelector('use');
+  typeUse.setAttribute('href', isVisit ? '#i-footprint' : '#i-clock');
+  typeTag.classList.toggle('is-visit', isVisit);
+  if (isVisit) typeTag.querySelector('use').classList.add('ico-fill');
+  node.querySelector('.record-type').textContent = isVisit ? '访问记录' : '时间线记录';
   node.querySelector('.record-time').textContent = formatTime(itemTimestamp(item));
+
+  // 独立访问足迹提示条
+  const footprint = node.querySelector('.footprint');
+  if (item.visits.length) {
+    footprint.hidden = false;
+    node.querySelector('.footprint-text').textContent = `访问过 ${item.visits.length} 次`;
+    const last = lastVisitTimestamp(item);
+    node.querySelector('.footprint-time').textContent = last ? `最近 ${formatTime(last)}` : '';
+  }
+
   node.querySelector('.author-name').textContent = authorName;
   node.querySelector('.author-handle').textContent = handle;
   const mediaDescriptions = media.map((image) => image.alt).filter((alt) => alt && alt !== '帖子图片');
@@ -214,9 +326,8 @@ function addRecord(item) {
     body.classList.add('collapsed');
     more.hidden = false;
     more.addEventListener('click', () => {
-      const expanded = body.classList.toggle('expanded');
-      body.classList.toggle('collapsed', !expanded);
-      more.textContent = expanded ? '收起' : '展开全文';
+      const collapsed = body.classList.toggle('collapsed');
+      more.textContent = collapsed ? '展开全文' : '收起';
     });
   }
 
@@ -239,7 +350,7 @@ function addRecord(item) {
     open.addEventListener('click', () => chrome.tabs.create({ url }));
   } else {
     open.disabled = true;
-    open.textContent = '暂无原帖链接';
+    open.firstChild.textContent = '暂无原帖链接 ';
   }
   records.append(node);
 }
@@ -310,25 +421,27 @@ async function loadDailyDigest() {
     if (!response?.ok) throw new Error(response?.error?.message || '读取日报失败');
     renderDailyDigest(response.data);
   } catch (error) {
-    status.textContent = `读取日报失败：${error.message}`;
+    setStatus(`读取日报失败：${error.message}`, true);
   }
 }
 
 async function generateDailyDigest() {
   const button = document.querySelector('#generate-digest');
   button.disabled = true;
-  button.textContent = '正在分析当天内容…';
-  status.textContent = '正在整理知识类别和兴趣方向…';
+  setButtonLabel(button, '正在分析当天内容…');
+  setStatus('正在整理知识类别和兴趣方向…');
   try {
     const response = await send({ type: 'memory.ai.daily-digest', date: digestDate.value });
     if (!response?.ok) throw new Error(response?.error?.message || '日报生成失败');
     renderDailyDigest(response.data);
-    status.textContent = `${digestDate.value} 的知识日报已保存`;
+    setStatus(`${digestDate.value} 的知识日报已保存`);
+    toast('success', '知识日报已生成并保存');
   } catch (error) {
-    status.textContent = `知识日报生成失败：${error.message}`;
+    setStatus(`知识日报生成失败：${error.message}`, true);
+    toast('error', `日报生成失败：${error.message}`);
   } finally {
     button.disabled = false;
-    button.textContent = '生成知识日报';
+    setButtonLabel(button, '生成今日日报');
   }
 }
 
@@ -336,11 +449,11 @@ async function testDigestPush() {
   const button = document.querySelector('#test-digest-push');
   const resultNode = document.querySelector('#digest-push-result');
   button.disabled = true;
-  button.textContent = '正在总结最近记录并推送…';
+  setButtonLabel(button, '正在总结最近记录并推送…');
   resultNode.hidden = false;
   resultNode.classList.remove('error');
   resultNode.textContent = '正在读取最近帖子、生成总结并推送…';
-  status.textContent = '正在读取最近帖子并测试推送…';
+  setStatus('正在读取最近帖子并测试推送…');
   try {
     const response = await send({ type: 'memory.ai.test-digest-push' });
     if (!response?.ok) throw new Error(response?.error?.message || '测试推送失败');
@@ -349,15 +462,36 @@ async function testDigestPush() {
     const channels = response.data.channels.map((channel) => channelNames[channel] || channel).join('、');
     const message = `推送成功：${channels} · 已总结最近 ${response.data.sampleCount} 条记录`;
     resultNode.textContent = message;
-    status.textContent = message;
+    setStatus(message);
+    toast('success', `已推送至 ${channels}`);
   } catch (error) {
     resultNode.classList.add('error');
     resultNode.textContent = error.message;
-    status.textContent = `测试推送失败：${error.message}`;
+    setStatus(`测试推送失败：${error.message}`, true);
+    toast('error', `测试推送失败：${error.message}`);
   } finally {
     button.disabled = false;
-    button.textContent = '测试推送（总结最近记录）';
+    setButtonLabel(button, '测试推送（总结最近记录）');
   }
+}
+
+function renderSkeletons() {
+  const card = '<div class="skeleton-card"><div class="sk-line sk-w40"></div><div class="sk-line sk-w60"></div><div class="sk-line sk-block sk-w100"></div><div class="sk-line sk-w85"></div></div>';
+  records.innerHTML = card + card + card;
+  document.querySelector('#pagination').hidden = true;
+}
+
+function renderEmpty(isSearch) {
+  const empty = document.createElement('div');
+  empty.className = 'empty-state';
+  const iconId = isSearch ? 'i-search' : 'i-inbox';
+  empty.innerHTML = `<div class="empty-ico"><svg class="ico"><use href="#${iconId}"></use></svg></div><strong></strong><span></span>`;
+  empty.querySelector('strong').textContent = isSearch ? '没有找到匹配的内容' : '记忆库还是空的';
+  empty.querySelector('span').textContent = isSearch
+    ? '换个关键词，或清除筛选条件再试试。'
+    : '打开 X 页面后，插件会自动保存可见帖子。';
+  records.append(empty);
+  document.querySelector('#pagination').hidden = true;
 }
 
 function renderItems() {
@@ -366,41 +500,41 @@ function renderItems() {
   const totalPages = Math.max(1, Math.ceil(items.length / pageSize));
   activePage = Math.min(activePage, totalPages);
   if (!items.length) {
-    const empty = document.createElement('div');
-    empty.className = 'empty-state';
-    empty.innerHTML = '<div class="empty-icon">⌁</div><strong>没有匹配的内容</strong><span>打开 X 页面后，插件会自动保存可见帖子。</span>';
-    records.append(empty);
-    document.querySelector('#pagination').hidden = true;
+    renderEmpty(Boolean(searchInput.value.trim()));
     return;
   }
   for (const item of items.slice((activePage - 1) * pageSize, activePage * pageSize)) addRecord(item);
   const pagination = document.querySelector('#pagination');
   pagination.hidden = items.length <= pageSize;
-  document.querySelector('#page-indicator').textContent = `第 ${activePage} / ${totalPages} 页 · 共 ${items.length} 条（每页 ${pageSize} 条）`;
+  document.querySelector('#page-indicator').textContent = `第 ${activePage} / ${totalPages} 页 · 共 ${items.length} 条`;
   document.querySelector('#page-previous').disabled = activePage === 1;
   document.querySelector('#page-next').disabled = activePage === totalPages;
 }
 
+function renderSummary(posts, observations, visits) {
+  document.querySelector('[data-stat="posts"]').textContent = posts;
+  document.querySelector('[data-stat="observations"]').textContent = observations;
+  document.querySelector('[data-stat="visits"]').textContent = visits;
+}
+
 async function loadRecords() {
-  status.textContent = '正在读取本地记录…';
-  document.querySelector('.hero').classList.remove('error');
-  records.replaceChildren();
+  setStatus('正在读取本地记录…');
+  statusStrip.classList.remove('is-error');
+  renderSkeletons();
   try {
     const response = await send({ type: 'memory.query.feed' });
     if (!response?.ok) throw new Error(response?.error?.message || '读取失败');
     allItems = response.data ?? [];
     const visits = allItems.reduce((count, item) => count + item.visits.length, 0);
     const observations = allItems.reduce((count, item) => count + item.observations.length, 0);
-    summary.textContent = `${allItems.length} 条帖子 · ${observations} 次观察 · ${visits} 次访问`;
-    summary.hidden = false;
-    status.textContent = allItems.length ? `${allItems.length} 条内容已保存` : '还没有本地记录';
+    renderSummary(allItems.length, observations, visits);
+    setStatus(allItems.length ? `${allItems.length} 条内容已保存` : '还没有本地记录');
     renderItems();
   } catch (error) {
     allItems = [];
-    summary.hidden = true;
+    renderSummary(0, 0, 0);
     renderItems();
-    status.textContent = `读取失败：${error.message}`;
-    document.querySelector('.hero').classList.add('error');
+    setStatus(`读取失败：${error.message}；本地数据未受影响`, true);
   }
 }
 
@@ -409,24 +543,38 @@ async function loadSettings() {
     const response = await send({ type: 'memory.settings.get' });
     if (!response?.ok) throw new Error(response?.error?.message || '读取设置失败');
     const value = response.data;
-    document.querySelector('.local-badge').textContent = value.s3.endpoint && value.s3.bucket ? 'LOCAL + S3' : 'LOCAL ONLY';
+    const s3Configured = Boolean(value.s3.endpoint && value.s3.bucket);
+    document.querySelector('#sync-badge').textContent = s3Configured ? 'LOCAL + S3' : 'LOCAL ONLY';
+    document.querySelector('#sync-badge').classList.toggle('synced', s3Configured);
     document.querySelector('#ai-endpoint').value = value.aiEndpoint || '';
     document.querySelector('#ai-model').value = value.aiModel || '';
-    document.querySelector('#ai-key').placeholder = value.aiApiKey ? '已配置；留空保持不变' : '粘贴 AI API Key';
+    document.querySelector('#ai-key').placeholder = value.aiApiKey ? '已配置；留空保持不变' : '留空则保留已保存的 Key';
     document.querySelector('#s3-endpoint').value = value.s3.endpoint || '';
     document.querySelector('#s3-bucket').value = value.s3.bucket || '';
     document.querySelector('#s3-region').value = value.s3.region || 'us-east-1';
     document.querySelector('#s3-access-key').value = value.s3.accessKeyId || '';
-    document.querySelector('#s3-secret-key').placeholder = value.s3.secretAccessKey ? '已配置；留空保持不变' : 'Secret Access Key';
-    document.querySelector('#s3-session-token').placeholder = value.s3.sessionToken ? '已配置；留空保持不变' : 'Session Token';
+    document.querySelector('#s3-secret-key').placeholder = value.s3.secretAccessKey ? '已配置；留空保持不变' : '留空则保留已保存的密钥';
+    document.querySelector('#s3-session-token').placeholder = value.s3.sessionToken ? '已配置；留空保持不变' : '留空则保留已保存的值';
     document.querySelector('#s3-prefix').value = value.s3.prefix || 'x-memory';
     document.querySelector('#digest-schedule-enabled').checked = value.schedule.dailyDigestEnabled;
     document.querySelector('#digest-schedule-time').value = value.schedule.dailyDigestTime || '09:00';
     document.querySelector('#webhook-url').value = value.webhook.url || '';
-    document.querySelector('#telegram-token').placeholder = value.webhook.telegramBotToken ? '已配置；留空保持不变' : '粘贴 Bot Token';
+    document.querySelector('#telegram-token').placeholder = value.webhook.telegramBotToken ? '已配置；留空保持不变' : '留空则保留已保存的 Token';
     document.querySelector('#telegram-chat-id').value = value.webhook.telegramChatId || '';
+    // 分组完成状态
+    const states = {
+      ai: Boolean(value.aiApiKey && value.aiEndpoint),
+      s3: s3Configured,
+      schedule: Boolean(value.schedule.dailyDigestEnabled || value.webhook.url || value.webhook.telegramBotToken)
+    };
+    for (const [key, configured] of Object.entries(states)) {
+      const badge = document.querySelector(`[data-state-for="${key}"]`);
+      if (!badge) continue;
+      badge.textContent = configured ? '已配置' : '未配置';
+      badge.classList.toggle('configured', configured);
+    }
   } catch (error) {
-    status.textContent = `读取设置失败：${error.message}`;
+    setStatus(`读取设置失败：${error.message}`, true);
   }
 }
 
@@ -494,16 +642,18 @@ async function saveSettings() {
     document.querySelector('#s3-session-token').value = '';
     document.querySelector('#telegram-token').value = '';
     await loadSettings();
-    status.textContent = '设置已保存在本机';
+    setStatus('设置已保存在本机');
+    toast('success', '设置已保存在本机');
   } catch (error) {
-    status.textContent = `保存设置失败：${error.message}`;
+    setStatus(`保存设置失败：${error.message}`, true);
+    toast('error', `保存失败：${error.message}`);
   } finally {
     button.disabled = false;
   }
 }
 
-async function exportData(format) {
-  const button = document.querySelector(format === 'json' ? '#export-json' : '#export-csv');
+async function exportData(format, sourceId) {
+  const button = document.querySelector(sourceId || (format === 'json' ? '#export-json' : '#export-csv'));
   button.disabled = true;
   try {
     const response = await send({ type: format === 'json' ? 'memory.export.snapshot' : 'memory.export.feed' });
@@ -527,9 +677,11 @@ async function exportData(format) {
       extension = 'csv';
     }
     downloadText(content, `x-memory-export-${date}.${extension}`, type);
-    status.textContent = `${format.toUpperCase()} 数据已导出`;
+    setStatus(`${format.toUpperCase()} 数据已导出`);
+    toast('success', `${format.toUpperCase()} 数据已导出`);
   } catch (error) {
-    status.textContent = `导出失败：${error.message}`;
+    setStatus(`导出失败：${error.message}`, true);
+    toast('error', `导出失败：${error.message}`);
   } finally {
     button.disabled = false;
   }
@@ -552,21 +704,24 @@ function downloadText(content, filename, type) {
 async function syncNow() {
   const button = document.querySelector('#sync-now');
   button.disabled = true;
-  status.textContent = '正在与 S3 同步…';
+  setStatus('正在与 S3 同步…');
   try {
     const response = await send({ type: 'memory.sync.run' });
     if (!response?.ok) throw new Error(response?.error?.message || 'S3 同步失败');
     await loadRecords();
-    status.textContent = `S3 同步完成 · ${response.data.uploaded} 条记录`;
+    setStatus(`S3 同步完成 · ${response.data.uploaded} 条记录`);
+    toast('success', `S3 同步完成 · ${response.data.uploaded} 条记录`);
   } catch (error) {
-    status.textContent = `S3 同步失败：${error.message}`;
+    setStatus(`S3 同步失败：${error.message}`, true);
+    toast('error', `S3 同步失败：${error.message}。本地数据未受影响。`);
   } finally {
     button.disabled = false;
   }
 }
 
 async function refreshRecords() {
-  status.textContent = '正在同步当前页面…';
+  refreshButton.classList.add('is-spinning');
+  setStatus('正在同步当前页面…');
   try {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
     if (tab?.id && /^https:\/\/(x\.com|twitter\.com)\//.test(tab.url || '')) {
@@ -583,18 +738,24 @@ async function refreshRecords() {
     await loadRecords();
   } catch (error) {
     await loadRecords();
-    status.textContent = `当前页面同步失败：${error.message}；请刷新 X 页面后重试`;
-    document.querySelector('.hero').classList.add('error');
+    setStatus(`当前页面同步失败：${error.message}；请刷新 X 页面后重试`, true);
+  } finally {
+    refreshButton.classList.remove('is-spinning');
   }
 }
 
 let updateTimer;
 chrome.storage.onChanged.addListener((changes, area) => {
-  if (area !== 'local' || !Object.keys(changes).some((key) => key.startsWith('xmemory.'))) return;
+  if (area !== 'local') return;
+  if ('xmemory.theme' in changes) {
+    applyTheme(changes['xmemory.theme'].newValue === 'dark' ? 'dark' : 'light');
+  }
+  if (!Object.keys(changes).some((key) => key.startsWith('xmemory.') && key !== 'xmemory.theme')) return;
   clearTimeout(updateTimer);
   updateTimer = setTimeout(loadRecords, 250);
 });
 
+loadTheme();
 refreshRecords();
 loadSettings();
 loadDailyDigest();
