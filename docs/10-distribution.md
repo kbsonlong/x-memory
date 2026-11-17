@@ -72,9 +72,21 @@ npm run build:chrome
 3. 填写商品详情、隐私政策 URL、权限说明，提交审核。
    - 注意：2026 年起商店对权限用途、隐私披露审查更严；本项目声明了 `storage/alarms/scripting` 与 `x.com`、`http(s)` 主机权限，且会把正文发送到用户配置的 AI/S3 服务，**必须在隐私政策中如实说明数据流**。
 
-### 3.3 Safari / Mac App Store（$99/年）
+### 3.3 Safari / App Store（$99/年）
 
-现有 `npm run build:extensions` 已能生成 `X Memory.app` 与 Xcode 工程，但构建使用 `CODE_SIGNING_ALLOWED=NO`（仅验证编译）。要分发必须加入 Apple Developer Program 并在 Xcode 中配置签名身份、公证后提交 App Store Connect。无账号时该 App 无法在他人 Mac 上正常运行。
+`npm run build:extensions` 会生成 **iOS + macOS 双目标** 的 Safari Web Extension（同一份 Xcode 工程）：
+
+| 产物 | 说明 |
+|------|------|
+| `build/safari/X-Memory.app` | macOS 端 App（未签名，仅本机可用） |
+| `build/safari/X-Memory-ios-simulator.zip` | iOS 模拟器包，可拖入模拟器即用 |
+| `build/safari/X-Memory-xcode-project.zip` | 双平台 Xcode 工程，真机/上架用 |
+
+- **iOS 模拟器**：无需签名，把模拟器 zip 解压后拖到打开的 Simulator 窗口即可安装；
+- **iOS 真机**：用 Xcode 打开工程 zip 里的工程，Team 选个人 Apple ID（免费），连接 iPhone 运行；扩展会在设置 → Safari → 扩展中出现（需在 iOS 设置里开启开发者模式）；
+- **正式分发/上架**：构建使用 `CODE_SIGNING_ALLOWED=NO`（仅验证编译）。要分发必须加入 Apple Developer Program（$99/年）并配置签名身份、公证后提交 App Store Connect。无账号时 App 无法在他人设备上正常运行。
+
+> 注意：`safari-web-extension-converter` 要求 manifest 必须声明 icons，否则直接报错退出。`npm run check` 已包含图标存在性校验。
 
 ---
 

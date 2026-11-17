@@ -6,13 +6,25 @@
   "permissions": ["storage", "alarms", "scripting"],
   "optional_host_permissions": ["https://*/*", "http://*/*"],
   "host_permissions": ["https://x.com/*", "https://twitter.com/*", "https://pbs.twimg.com/*"],
+  "icons": {
+    "16": "apps/extension/icons/icon-16.png",
+    "32": "apps/extension/icons/icon-32.png",
+    "48": "apps/extension/icons/icon-48.png",
+    "128": "apps/extension/icons/icon-128.png"
+  },
   "background": {
     "service_worker": "apps/extension/background.js",
     "type": "module"
   },
   "action": {
     "default_title": "X Memory",
-    "default_popup": "apps/extension/popup.html"
+    "default_popup": "apps/extension/popup.html",
+    "default_icon": {
+      "16": "apps/extension/icons/icon-16.png",
+      "32": "apps/extension/icons/icon-32.png",
+      "48": "apps/extension/icons/icon-48.png",
+      "128": "apps/extension/icons/icon-128.png"
+    }
   },
   "content_scripts": [
     {

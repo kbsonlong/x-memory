@@ -12,6 +12,15 @@ for (const relative of paths) {
   const file = path.join(root, relative);
   if (!fs.existsSync(file)) throw new Error(`manifest path does not exist: ${relative}`);
 }
+// Icons are mandatory: safari-web-extension-converter fails without them.
+const iconPaths = [
+  ...Object.values(manifest.icons ?? {}),
+  ...Object.values(manifest.action?.default_icon ?? {})
+];
+for (const relative of iconPaths) {
+  const file = path.join(root, relative);
+  if (!fs.existsSync(file)) throw new Error(`manifest icon does not exist: ${relative}`);
+}
 if (manifest.manifest_version !== 3) throw new Error('MV3 is required');
 if (manifest.background.type !== 'module') throw new Error('service worker must be a module');
 console.log(`extension manifest ok (${paths.length} referenced files)`);

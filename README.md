@@ -140,10 +140,23 @@ X 页面 ──采集──> content script ──消息──> service worker
 
 ```sh
 npm test              # 17 项测试
-npm run check         # 语法与 manifest 校验
+npm run check         # 语法、manifest 与图标校验
 npm run build:chrome  # 构建 Chrome/Edge 包
-npm run build:extensions  # 含 Safari Xcode 工程（需 macOS）
+npm run build:extensions  # 构建 Safari 双平台（macOS + iOS，需 macOS + Xcode）
 ```
+
+### Safari（macOS / iOS）
+
+`npm run build:extensions` 会生成同时包含 iOS 与 macOS 目标的 Safari Web Extension：
+
+| 产物 | 用途 |
+|------|------|
+| `build/safari/X-Memory.app` | macOS 端 App，双击运行后在 Safari 设置中勾选扩展 |
+| `build/safari/X-Memory-macos-safari.zip` | macOS 分发包 |
+| `build/safari/X-Memory-ios-simulator.zip` | iOS 模拟器包，可直接拖入模拟器验证 |
+| `build/safari/X-Memory-xcode-project.zip` | 含 iOS + macOS 双目标的 Xcode 工程，真机调试用 |
+
+iOS 真机安装：解压 Xcode 工程后用 Xcode 打开，选择自己的开发者身份签名，连接 iPhone 运行即可（免费 Apple ID 也能真机调试）。
 
 ---
 

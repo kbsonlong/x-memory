@@ -17,13 +17,14 @@ function reset(path) {
   mkdirSync(path, { recursive: true });
 }
 
-// Stage: manifest + extension pages + shared src modules
+// Stage: manifest + extension pages + icons + shared src modules
 reset(unpacked);
 cpSync(join(root, 'manifest.json'), join(unpacked, 'manifest.json'));
 mkdirSync(join(unpacked, 'apps', 'extension'), { recursive: true });
 for (const file of ['background.js', 'content.js', 'popup.html', 'popup.js', 'popup.css']) {
   cpSync(join(root, 'apps', 'extension', file), join(unpacked, 'apps', 'extension', file));
 }
+cpSync(join(root, 'apps', 'extension', 'icons'), join(unpacked, 'apps', 'extension', 'icons'), { recursive: true });
 cpSync(join(root, 'src'), join(unpacked, 'src'), { recursive: true });
 
 // Zip (manifest.json must sit at archive root)
